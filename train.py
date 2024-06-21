@@ -139,7 +139,7 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
         rewards = []
 
         for steps in range(1,limit_step+1):
-            action = algo.select_action(state)
+            action = algo.select_action(state, mean=True)
             next_state, reward, done, truncated, info = env.step(action)
             rewards.append(reward)
             state = next_state
@@ -205,7 +205,7 @@ for i in range(start_episode, num_episodes):
     #-----------------2. initialize Actor with random weights during exploration------------
     if not Q_learning and total_steps<explore_time: algo.actor.apply(init_weights)
     #--------------------2. CPU/GPU cooling ------------------
-    if Q_learning: time.sleep(0.5)
+    if Q_learning: time.sleep(1.0)
     #-----------3. slighlty random initial configuration as in OpenAI Pendulum----
 
         
@@ -223,7 +223,6 @@ for i in range(start_episode, num_episodes):
             Q_learning = True
 
  
-
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
