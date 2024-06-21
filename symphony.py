@@ -141,15 +141,15 @@ class Critic(nn.Module):
 
         qA = nn.Sequential(
             FeedForward(state_dim+action_dim, hidden_dim, 128),
-            InplaceDropout(0.25)
+            InplaceDropout(0.5)
         )
         qB = nn.Sequential(
             FeedForward(state_dim+action_dim, hidden_dim, 128),
-            InplaceDropout(0.25)
+            InplaceDropout(0.5)
         )
         qC = nn.Sequential(
             FeedForward(state_dim+action_dim, hidden_dim, 128),
-            InplaceDropout(0.25)
+            InplaceDropout(0.5)
         )
 
         self.nets = nn.ModuleList([qA, qB, qC])
@@ -226,7 +226,7 @@ class Symphony(object):
 
 
         q_next_target_new = self.critic_target(next_state, next_action, united=True)
-        actor_loss = -ReHAE(q_next_target_new - q_next_target)
+        actor_loss = -ReHAE(2.0*(q_next_target_new - q_next_target))
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -247,7 +247,7 @@ class Symphony(object):
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity, fade_factor=7.0):
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = min(max(64, self.length//150), 256) #in order for sample to describe population
+        self.batch_size = min(max(128, self.length//250), 256) #in order for sample to describe population
         self.indices = []
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32).to(device)
