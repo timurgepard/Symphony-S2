@@ -177,8 +177,8 @@ class Symphony(object):
         self.critic = Critic(state_dim, action_dim, hidden_dim).to(device)
         self.critic_target = copy.deepcopy(self.critic)
 
-        self.critic_optimizer = optim.AdamW(self.critic.parameters(), lr=5e-4)
-        self.actor_optimizer = optim.AdamW(self.actor.parameters(), lr=5e-4)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=3e-4)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-4)
 
 
         self.max_action = max_action
@@ -242,12 +242,10 @@ class Symphony(object):
         
             
 
-
-
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity, fade_factor=7.0):
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = min(max(128, self.length//250), 256) #in order for sample to describe population
+        self.batch_size = min(max(128, self.length//250), 256)
         self.indices = []
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32).to(device)
@@ -272,7 +270,7 @@ class ReplayBuffer:
         self.next_states[idx,:] = torch.FloatTensor(next_state).to(self.device)
         self.dones[idx,:] = torch.FloatTensor([done]).to(self.device)
 
-        self.batch_size = min(max(64, self.length//150), 256)
+        self.batch_size = min(max(128, self.length//250), 256)
 
 
         if self.length==self.capacity:
