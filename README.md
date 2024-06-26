@@ -11,6 +11,7 @@ Some ideas was dropped and some proven their worth was solidified:
 3. Rectified Learnable Sine Wave Activation Function
 4. Rectified Huber Symmetric and Asymmetric Loss Functions
 5. Inplace Dropouts
+6. Seamless Actor-Critic update
 
 Some modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule.
 
