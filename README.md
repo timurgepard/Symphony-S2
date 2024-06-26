@@ -8,6 +8,6 @@ Some ideas was dropped and some proven their worth was solidified:
 
 1. Temporal Advantage
 2. Fading Replay Buffuer
-3. Rectified Sine Wave Activation Function
+3. Rectified Learnable Sine Wave Activation Function
 4. Rectified Huber Symmetric and Asymmetric Loss Functions
 5. Inplace Dropouts
