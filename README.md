@@ -10,8 +10,8 @@ Some ideas were dropped and some proven their worth were solidified:
 2. Fading Replay Buffuer
 3. Rectified Learnable Sine Wave Activation Function
 4. Rectified Huber Symmetric and Asymmetric Loss Functions
-5. Inplace Dropouts
-6. Seamless Actor-Critic update
+5. Seamless Actor-Critic update
+6. Inplace Dropouts
 
 Some modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule.
 
