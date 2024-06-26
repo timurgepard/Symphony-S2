@@ -7,7 +7,7 @@ I believe that industrial applications need not only a fast growth but an assymp
 Some ideas were dropped and some proven their worth were solidified:
 
 1. Temporal Advantage
-2. Fading Replay Buffuer
+2. Fading Replay Buffer
 3. Rectified Learnable Sine Wave Activation Function
 4. Rectified Huber Symmetric and Asymmetric Loss Functions
 5. Seamless Actor-Critic update
