@@ -48,11 +48,10 @@ def ReHAE(error):
     e = error.mean()
     return torch.abs(e)*torch.tanh(e)
 
-#ReHSE_ = torch.jit.trace(ReHSE, torch.rand((128,128)))
-#ReHAE_ = torch.jit.trace(ReHAE, torch.rand((64,128)))
 
 
-#This function created with the help of ChatGPT
+#Inplace Dropout function created with the help of ChatGPT
+# nn.Module -> C++ graph
 class InplaceDropout(jit.ScriptModule):
     def __init__(self, p=0.5):
         super(InplaceDropout, self).__init__()
@@ -66,10 +65,13 @@ class InplaceDropout(jit.ScriptModule):
         else:
             return x * (1 - self.p)
 
+#ReSine Activation Function
+# nn.Module -> C++ graph
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
         self.scale = nn.Parameter(data=torch.randn(hidden_dim))
+
     @jit.script_method
     def forward(self, x):
         scale = torch.sigmoid(1e-4*self.scale)
@@ -77,8 +79,7 @@ class ReSine(jit.ScriptModule):
         return F.prelu(x, 0.1*scale)
 
 
-
-
+# nn.Module -> C++ graph
 class FeedForward(jit.ScriptModule):
     def __init__(self, f_in, hidden_dim=256, f_out=1):
         super(FeedForward, self).__init__()
@@ -136,12 +137,10 @@ class Actor(nn.Module):
 
  
 
-        
+# nn.Module -> C++ graph
 class Critic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, hidden_dim=256):
         super(Critic, self).__init__()
-
-
 
         qA = nn.Sequential(
             FeedForward(state_dim+action_dim, hidden_dim, 128),
@@ -202,7 +201,7 @@ class Symphony(object):
         return action.cpu().data.numpy().flatten()
 
 
-    def train(self, tr_per_step=10):
+    def train(self, tr_per_step=5):
         for i in range(tr_per_step):
             state, action, reward, next_state, done = self.replay_buffer.sample()
             self.update(state, action, reward, next_state, done)
@@ -212,7 +211,6 @@ class Symphony(object):
 
     def update(self, state, action, reward, next_state, done):
 
-        
         with torch.no_grad():
             for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param)
