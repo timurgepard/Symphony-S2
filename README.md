@@ -11,3 +11,6 @@ Some ideas was dropped and some proven their worth was solidified:
 3. Rectified Learnable Sine Wave Activation Function
 4. Rectified Huber Symmetric and Asymmetric Loss Functions
 5. Inplace Dropouts
+
+Architecture:
+![image](https://github.com/timurgepard/Symphony-Classic/assets/13238473/459a9e9b-250f-467c-ad04-4d7e76d0f8c7)
