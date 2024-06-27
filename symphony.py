@@ -9,7 +9,6 @@ import torch.nn.functional as F
 import torch.jit as jit
 
 
-
 #==============================================================================================
 #==============================================================================================
 #=========================================SYMPHONY=============================================
@@ -97,11 +96,13 @@ class FeedForward(jit.ScriptModule):
     def forward(self, x):
         return self.ffw(x)
 
-# Define the actor network
-class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim, device, hidden_dim=256, max_action=1.0):
-        super(Actor, self).__init__()
-        self.device = device
+
+# the Agent should not be here. However, JIT(C++ graph compilation) has to recomplie Actor each time,
+# when we change input from (1,dim) to (batch,dim), which slows down training drammatically. 
+# Those we use Agent to interact with Environment, and Actor to train.
+class Agent(nn.Module):
+    def __init__(self, state_dim, action_dim, hidden_dim=256, max_action=1.0):
+        super(Agent, self).__init__()
         
         self.inA = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
@@ -116,7 +117,7 @@ class Actor(nn.Module):
             InplaceDropout(0.05)
         )
         
-
+        
         self.ffw = nn.Sequential(
             FeedForward(3*hidden_dim, hidden_dim, action_dim),
             nn.Tanh()
@@ -129,7 +130,47 @@ class Actor(nn.Module):
     def forward(self, state):
         x = torch.cat([self.inA(state), self.inB(state), self.inC(state)], dim=-1)
         return self.max_action*self.ffw(x)
+
+    def soft(self, state):
+        x = self.forward(state)
+        x += self.scale*torch.randn_like(x).clamp(-self.lim, self.lim)
+        return x.clamp(-self.max_action, self.max_action)
+
+
+# nn.Module -> C++ graph
+class Actor(jit.ScriptModule):
+    def __init__(self, state_dim, action_dim, hidden_dim=256, max_action=1.0):
+        super(Actor, self).__init__()
+        
+        self.inA = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            InplaceDropout(0.05)
+        )
+        self.inB = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            InplaceDropout(0.05)
+        )
+        self.inC = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            InplaceDropout(0.05)
+        )
+        
+        
+        self.ffw = nn.Sequential(
+            FeedForward(3*hidden_dim, hidden_dim, action_dim),
+            nn.Tanh()
+        )
+
+        self.max_action = torch.mean(max_action).item()
+        self.scale = 0.05*self.max_action
+        self.lim = 2.5*self.scale
     
+    @jit.script_method
+    def forward(self, state):
+        x = torch.cat([self.inA(state), self.inB(state), self.inC(state)], dim=-1)
+        return self.max_action*self.ffw(x)
+
+    @jit.script_method
     def soft(self, state):
         x = self.forward(state)
         x += self.scale*torch.randn_like(x).clamp(-self.lim, self.lim)
@@ -169,14 +210,14 @@ class Critic(jit.ScriptModule):
         return torch.min(xs, dim=-1, keepdim=True).values
 
 
-# Define the actor-critic agent
+# Define the algorithm
 class Symphony(object):
-    def __init__(self, state_dim, action_dim, hidden_dim, device, max_action=1.0, tau=0.005, capacity=384000, fade_factor=10.0):
+    def __init__(self, state_dim, action_dim, hidden_dim, device, max_action=1.0, tau=0.005, capacity=768000, fade_factor=10.0):
 
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity, fade_factor)
 
-
-        self.actor = Actor(state_dim, action_dim, device, hidden_dim, max_action=max_action).to(device)
+        self.agent = Agent(state_dim, action_dim, hidden_dim, max_action=max_action).to(device)
+        self.actor = Actor(state_dim, action_dim, hidden_dim, max_action=max_action).to(device)
 
         self.critic = Critic(state_dim, action_dim, hidden_dim).to(device)
         self.critic_target = copy.deepcopy(self.critic)
@@ -197,19 +238,19 @@ class Symphony(object):
     def select_action(self, states, mean=False):
         states = np.array(states)
         state = torch.FloatTensor(states).reshape(-1,self.state_dim).to(self.device)
-        with torch.no_grad(): action = self.actor(state) if mean else self.actor.soft(state)
+        with torch.no_grad(): action = self.agent(state) if mean else self.agent.soft(state)
         return action.cpu().data.numpy().flatten()
 
 
     def train(self, tr_per_step=5):
-        for i in range(tr_per_step):
-            state, action, reward, next_state, done = self.replay_buffer.sample()
-            self.update(state, action, reward, next_state, done)
-
-            
+        for _ in range(tr_per_step): self.update()
+        self.agent.load_state_dict(self.actor.state_dict())
 
 
-    def update(self, state, action, reward, next_state, done):
+
+    def update(self):
+
+        state, action, reward, next_state, done = self.replay_buffer.sample()
 
         with torch.no_grad():
             for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
@@ -218,16 +259,16 @@ class Symphony(object):
         #Actor Update 
         next_action = self.actor.soft(next_state)
         q_next_target = self.critic_target.min(next_state, next_action)
-        actor_loss = -ReHAE(2*(q_next_target - self.q_next_old_policy))
+        actor_loss = -ReHAE(2.0*(q_next_target - self.q_next_old_policy))
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
         
         #Critic Update
-        q_value = reward +  (1-done) * 0.99 * q_next_target.detach()
+        q = reward +  (1-done) * 0.99 * q_next_target.detach()
         qs = self.critic(state, action)
-        critic_loss = ReHSE(q_value - qs[0]) + ReHSE(q_value - qs[1]) + ReHSE(q_value - qs[2])
+        critic_loss = ReHSE(q - qs[0]) + ReHSE(q - qs[1]) + ReHSE(q - qs[2])
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
