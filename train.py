@@ -203,9 +203,9 @@ for i in range(start_episode, num_episodes):
     np.random.seed(r2)
     random.seed(r3)
     #-----------------2. initialize Actor with random weights during exploration------------
-    if not Q_learning and total_steps<explore_time: algo.actor.apply(init_weights)
+    if not Q_learning and total_steps<explore_time: algo.agent.apply(init_weights)
     #--------------------2. CPU/GPU cooling ------------------
-    if Q_learning: time.sleep(1.0)
+    if Q_learning: time.sleep(0.5)
     #-----------3. slighlty random initial configuration as in OpenAI Pendulum----
 
         
