@@ -25,8 +25,6 @@ option = 3
 
 
 
-
-
 explore_time = 1000
 tr_per_step = 5 # actor's updates per frame/step
 limit_step = 1000 #max steps per episode
