@@ -38,15 +38,16 @@ log_name = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
 log_file = LogFile(log_name)
 
 #Rectified Huber Symmetric Error Loss Function
-def ReHSE(error):
-    ae = torch.abs(error).mean()
+@torch.compile(backend="inductor")
+def ReHSE(y1, y2):
+    ae = torch.abs(y1-y2).mean()
     return ae*torch.tanh(ae)
 
 #Rectified Huber Asymmetric Error Loss Function
-def ReHAE(error):
-    e = error.mean()
+@torch.compile(backend="inductor")
+def ReHAE(y1, y2, weight=2.0):
+    e = (weight*(y1-y2)).mean()
     return torch.abs(e)*torch.tanh(e)
-
 
 
 #Inplace Dropout function created with the help of ChatGPT
@@ -170,7 +171,6 @@ class Actor(jit.ScriptModule):
         x = torch.cat([self.inA(state), self.inB(state), self.inC(state)], dim=-1)
         return self.max_action*self.ffw(x)
 
-    @jit.script_method
     def soft(self, state):
         x = self.forward(state)
         x += self.scale*torch.randn_like(x).clamp(-self.lim, self.lim)
@@ -259,7 +259,7 @@ class Symphony(object):
         #Actor Update 
         next_action = self.actor.soft(next_state)
         q_next_target = self.critic_target.min(next_state, next_action)
-        actor_loss = -ReHAE(2.0*(q_next_target - self.q_next_old_policy))
+        actor_loss = -ReHAE(q_next_target, self.q_next_old_policy, 2.0)
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -268,7 +268,7 @@ class Symphony(object):
         #Critic Update
         q = reward +  (1-done) * 0.99 * q_next_target.detach()
         qs = self.critic(state, action)
-        critic_loss = ReHSE(q - qs[0]) + ReHSE(q - qs[1]) + ReHSE(q - qs[2])
+        critic_loss = ReHSE(q, qs[0]) + ReHSE(q, qs[1]) + ReHSE(q, qs[2])
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
@@ -322,10 +322,9 @@ class ReplayBuffer:
 
         
 
-
     def generate_probs(self):
         if self.step>self.capacity: return self.probs
-        def fade(norm_index): return np.tanh(self.fade_factor*norm_index**2) # linear / -> non-linear _/‾
+        def fade(norm_index): return np.tanh(self.fade_factor*norm_index**3) # linear / -> non-linear _/‾
         weights = 1e-7*(fade(self.indexes/self.length))# weights are based solely on the history, highly squashed
         self.probs = weights/np.sum(weights)
         return self.probs
