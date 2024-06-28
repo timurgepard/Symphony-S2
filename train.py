@@ -36,7 +36,7 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], F
 
 hidden_dim = 384
 capacity = 1000000
-fade_factor = 10 # fading memory factor, 7 -remembers ~30% of the last transtions before gradual forgetting, 1 - linear forgetting, 10 - ~50% of transitions, 100 - ~70% of transitions.
+fade_factor = 20 # fading memory factor, 7 -remembers ~30% of the last transtions before gradual forgetting, 1 - linear forgetting, 10 - ~50% of transitions, 100 - ~70% of transitions.
 tau = 0.005
 
 
