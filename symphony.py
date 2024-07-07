@@ -21,7 +21,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # random seeds
 r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
-#r1, r2, r3 = 1230414746, 178766581, 4283848828
+#r1, r2, r3 = 268581253, 3930892457, 3743293586
 print(r1, ", ", r2, ", ", r3)
 torch.manual_seed(r1)
 np.random.seed(r2)
@@ -37,21 +37,36 @@ class LogFile(object):
 log_name = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
 log_file = LogFile(log_name)
 
-#Rectified Huber Symmetric Error Loss Function
-@torch.compile(backend="inductor")
-def ReHSE(y1, y2):
-    ae = torch.abs(y1-y2).mean()
-    return ae*torch.tanh(ae)
+#Rectified Huber Symmetric Error Loss Function via JIT Module
+# nn.Module -> JIT C++ graph
+class ReHSE(jit.ScriptModule):
+    def __init__(self):
+        super(ReHSE, self).__init__()
 
-#Rectified Huber Asymmetric Error Loss Function
-@torch.compile(backend="inductor")
-def ReHAE(y1, y2, weight=2.0):
-    e = (weight*(y1-y2)).mean()
-    return torch.abs(e)*torch.tanh(e)
+    @jit.script_method
+    def forward(self, y1, y2):
+        ae = torch.abs(y1-y2)
+        ae = ae*torch.tanh(ae)
+        return ae.mean()
+
+#Rectified Huber Asymmetric Error Loss Function via JIT Module
+# nn.Module -> JIT C++ graph
+class ReHAE(jit.ScriptModule):
+    def __init__(self):
+        super(ReHAE, self).__init__()
+
+    @jit.script_method
+    def forward(self, y1, y2):
+        e = (y1-y2)
+        e = torch.abs(e)*torch.tanh(e)
+        return e.mean()
+
 
 
 #Inplace Dropout function created with the help of ChatGPT
-# nn.Module -> C++ graph
+# It is not recommended to use JIT compilation decorator with random generator as Symphony updates seeds each time
+# We did exception only for this module as it is used inside neural networks.
+# nn.Module -> JIT C++ graph
 class InplaceDropout(jit.ScriptModule):
     def __init__(self, p=0.5):
         super(InplaceDropout, self).__init__()
@@ -59,14 +74,11 @@ class InplaceDropout(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x):
-        if self.training:
-            mask = (torch.rand_like(x) > self.p).float()
-            return  mask * x + (1-mask) * x.detach()
-        else:
-            return x * (1 - self.p)
+        mask = (torch.rand_like(x) > self.p).float()
+        return  mask * x + (1.0-mask) * x.detach()
 
 #ReSine Activation Function
-# nn.Module -> C++ graph
+# nn.Module -> JIT C++ graph
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
@@ -74,14 +86,14 @@ class ReSine(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x):
-        scale = torch.sigmoid(1e-4*self.scale)
+        scale = torch.sigmoid(3e-4*self.scale)
         x = scale*torch.sin(x/scale)
         return F.prelu(x, 0.1*scale)
 
-
-# nn.Module -> C++ graph
+#Shared Feed Forward Module
+# nn.Module -> JIT C++ graph
 class FeedForward(jit.ScriptModule):
-    def __init__(self, f_in, hidden_dim=256, f_out=1):
+    def __init__(self, f_in, f_out=1):
         super(FeedForward, self).__init__()
 
         self.ffw = nn.Sequential(
@@ -98,79 +110,43 @@ class FeedForward(jit.ScriptModule):
         return self.ffw(x)
 
 
-# the Agent should not be here. However, JIT(C++ graph compilation) has to recomplie Actor each time,
-# when we change input from (1,dim) to (batch,dim), which slows down training drammatically. 
-# Those we use Agent to interact with Environment, and Actor to train.
-class Agent(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim=256, max_action=1.0):
-        super(Agent, self).__init__()
-        
-        self.inA = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            InplaceDropout(0.05)
-        )
-        self.inB = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            InplaceDropout(0.05)
-        )
-        self.inC = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            InplaceDropout(0.05)
-        )
-        
-        
-        self.ffw = nn.Sequential(
-            FeedForward(3*hidden_dim, hidden_dim, action_dim),
-            nn.Tanh()
-        )
-
-        self.max_action = torch.mean(max_action).item()
-        self.scale = 0.05*self.max_action
-        self.lim = 2.5*self.scale
-    
-    def forward(self, state):
-        x = torch.cat([self.inA(state), self.inB(state), self.inC(state)], dim=-1)
-        return self.max_action*self.ffw(x)
-
-    def soft(self, state):
-        x = self.forward(state)
-        x += self.scale*torch.randn_like(x).clamp(-self.lim, self.lim)
-        return x.clamp(-self.max_action, self.max_action)
-
-
-# nn.Module -> C++ graph
-class Actor(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, hidden_dim=256, max_action=1.0):
+#We recommend not to JIT compile Actor
+# underlying logic for different shape input is unclear
+class Actor(nn.Module):
+    def __init__(self, state_dim, action_dim, max_action=1.0, prob=0.25):
         super(Actor, self).__init__()
+
+        hidden_dim = 384
         
         self.inA = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
-            InplaceDropout(0.05)
+            InplaceDropout(prob)
         )
         self.inB = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
-            InplaceDropout(0.05)
+            InplaceDropout(prob)
         )
         self.inC = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
-            InplaceDropout(0.05)
+            InplaceDropout(prob)
         )
         
         
         self.ffw = nn.Sequential(
-            FeedForward(3*hidden_dim, hidden_dim, action_dim),
+            FeedForward(3*hidden_dim, action_dim),
             nn.Tanh()
         )
 
         self.max_action = torch.mean(max_action).item()
-        self.scale = 0.05*self.max_action
+        self.scale = 0.1*self.max_action
         self.lim = 2.5*self.scale
     
-    @jit.script_method
+
     def forward(self, state):
         x = torch.cat([self.inA(state), self.inB(state), self.inC(state)], dim=-1)
         return self.max_action*self.ffw(x)
-
+    
+    # Do not use any decorators with random generators (Symphony updates seed each time)
     def soft(self, state):
         x = self.forward(state)
         x += self.scale*torch.randn_like(x).clamp(-self.lim, self.lim)
@@ -178,22 +154,23 @@ class Actor(jit.ScriptModule):
 
  
 
-# nn.Module -> C++ graph
+# nn.Module -> JIT C++ graph
 class Critic(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, hidden_dim=256):
+    def __init__(self, state_dim, action_dim, prob=0.75):
         super(Critic, self).__init__()
 
+
         qA = nn.Sequential(
-            FeedForward(state_dim+action_dim, hidden_dim, 128),
-            InplaceDropout(0.5)
+            FeedForward(state_dim+action_dim, 128),
+            InplaceDropout(prob)
         )
         qB = nn.Sequential(
-            FeedForward(state_dim+action_dim, hidden_dim, 128),
-            InplaceDropout(0.5)
+            FeedForward(state_dim+action_dim, 128),
+            InplaceDropout(prob)
         )
         qC = nn.Sequential(
-            FeedForward(state_dim+action_dim, hidden_dim, 128),
-            InplaceDropout(0.5)
+            FeedForward(state_dim+action_dim, 128),
+            InplaceDropout(prob)
         )
 
         self.nets = nn.ModuleList([qA, qB, qC])
@@ -210,20 +187,23 @@ class Critic(jit.ScriptModule):
         return torch.min(xs, dim=-1, keepdim=True).values
 
 
+
 # Define the algorithm
 class Symphony(object):
-    def __init__(self, state_dim, action_dim, hidden_dim, device, max_action=1.0, tau=0.005, capacity=768000, fade_factor=10.0):
+    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.0057, prob_a=0.25, prob_c = 0.75, capacity=200000, batch_lim = 384, fade_factor=10.0):
 
-        self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity, fade_factor)
+        self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity, batch_lim, fade_factor)
 
-        self.agent = Agent(state_dim, action_dim, hidden_dim, max_action=max_action).to(device)
-        self.actor = Actor(state_dim, action_dim, hidden_dim, max_action=max_action).to(device)
+        self.actor = Actor(state_dim, action_dim, max_action=max_action, prob=prob_a).to(device)
 
-        self.critic = Critic(state_dim, action_dim, hidden_dim).to(device)
+        self.critic = Critic(state_dim, action_dim, prob=prob_c).to(device)
         self.critic_target = copy.deepcopy(self.critic)
 
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=3e-4)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-4)
+
+        self.rehse = ReHSE()
+        self.rehae = ReHAE()
 
 
         self.max_action = max_action
@@ -232,43 +212,41 @@ class Symphony(object):
         self.device = device
         self.state_dim = state_dim
         self.action_dim = action_dim
-        self.q_next_old_policy = 0.0
+        self.q_next_old_policy = torch.zeros(1).to(device)
+        
+        
 
 
-    def select_action(self, states, mean=False):
-        states = np.array(states)
-        state = torch.FloatTensor(states).reshape(-1,self.state_dim).to(self.device)
-        with torch.no_grad(): action = self.agent(state) if mean else self.agent.soft(state)
+    def select_action(self, state, mean=False):
+        state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
+        with torch.no_grad(): action = self.actor(state) if mean else self.actor.soft(state)
         return action.cpu().data.numpy().flatten()
 
 
     def train(self, tr_per_step=5):
         for _ in range(tr_per_step): self.update()
-        self.agent.load_state_dict(self.actor.state_dict())
-
 
 
     def update(self):
-
         state, action, reward, next_state, done = self.replay_buffer.sample()
 
         with torch.no_grad():
             for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param)
-
-        #Actor Update 
+        
+        #Actor Update
         next_action = self.actor.soft(next_state)
         q_next_target = self.critic_target.min(next_state, next_action)
-        actor_loss = -ReHAE(q_next_target, self.q_next_old_policy, 2.0)
-
+        actor_loss = -self.rehae(q_next_target, self.q_next_old_policy)
+        
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
-        
+
         #Critic Update
-        q = reward +  (1-done) * 0.99 * q_next_target.detach()
+        q = reward + (1-done) * 0.99 * q_next_target.detach()
         qs = self.critic(state, action)
-        critic_loss = ReHSE(q, qs[0]) + ReHSE(q, qs[1]) + ReHSE(q, qs[2])
+        critic_loss = self.rehse(q, qs[0]) + self.rehse(q, qs[1]) + self.rehse(q, qs[2])
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
@@ -276,17 +254,19 @@ class Symphony(object):
 
 
         with torch.no_grad(): self.q_next_old_policy = q_next_target.detach().mean()
-     
+
 
 
 
 class ReplayBuffer:
-    def __init__(self, state_dim, action_dim, device, capacity, fade_factor=7.0):
+    def __init__(self, state_dim, action_dim, device, capacity, batch_lim, fade_factor=7.0):
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = min(max(64, self.length//250), 2048) #in order for sample to describe population
+        self.batch_size = min(max(128, self.length//100), batch_lim) #in order for sample to describe population
         self.random = np.random.default_rng()
-        self.indices, self.indexes, self.probs, self.step = [], np.array([]), np.array([]), 0
+        self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
         self.fade_factor = fade_factor
+        self.probs_ready = False
+        self.batch_lim = batch_lim
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32).to(device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32).to(device)
@@ -300,17 +280,15 @@ class ReplayBuffer:
             self.length += 1
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
+            self.batch_size = min(max(128, self.length//100), self.batch_lim)
 
         idx = self.length-1
-        
 
         self.states[idx,:] = torch.FloatTensor(state).to(self.device)
         self.actions[idx,:] = torch.FloatTensor(action).to(self.device)
         self.rewards[idx,:] = torch.FloatTensor([reward]).to(self.device)
         self.next_states[idx,:] = torch.FloatTensor(next_state).to(self.device)
         self.dones[idx,:] = torch.FloatTensor([done]).to(self.device)
-
-        self.batch_size = min(max(128, self.length//250), 2048)
 
 
         if self.length==self.capacity:
@@ -320,16 +298,16 @@ class ReplayBuffer:
             self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
             self.dones = torch.roll(self.dones, shifts=-1, dims=0)
 
-        
 
     def generate_probs(self):
-        if self.step>self.capacity: return self.probs
-        def fade(norm_index): return np.tanh(self.fade_factor*norm_index**3) # linear / -> non-linear _/‾
-        weights = 1e-7*(fade(self.indexes/self.length))# weights are based solely on the history, highly squashed
+        if self.probs_ready: return self.probs
+        def fade(norm_index): return np.tanh(self.fade_factor*norm_index**2.3) # linear / -> non-linear _/‾
+        weights = 1e-7*fade(self.indexes/self.length)# weights are based solely on the history, highly squashed
         self.probs = weights/np.sum(weights)
+        if self.length>=self.capacity: self.probs_ready = True
         return self.probs
-
-
+    
+    # Do not use any decorators with random generators (Symphony updates seed each time)
     def sample(self):
         indices = self.random.choice(self.indexes, p=self.generate_probs(), size=self.batch_size)
 
