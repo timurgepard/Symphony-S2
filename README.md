@@ -1,6 +1,6 @@
 # Symphony-Classic
 
-Nothing is possible without our Lord and Saviour Jesus Christ. But everything is possible with Him. I was morally dying, addicted to ponrography and video-games. But He intervened, and gave me new life.
+Nothing is possible without our Lord and Saviour Jesus Christ. But everything is possible with Him. I was morally dying, addicted to ponrography and video-games. But He intervened, and gave me a new life.
 
 This repository was created to support the 2024 paper.
 It is unification and simplification of Symphony-1.0, Symphony-2.0(2.1) and draft of Symphony-3.0 (Draft) into single Symphony-Classic-UTD-5 version (Model-free Deterministic Algorithm)
