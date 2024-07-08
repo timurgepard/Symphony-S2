@@ -12,7 +12,7 @@ Some ideas were dropped and some proven their worth were solidified:
 2. Fading Replay Buffer ✅
 3. Rectified Learnable Sine Wave Activation Function ✅
 4. Rectified Huber Symmetric and Asymmetric Loss Functions ✅
-5. Seamless Actor-Critic update ✅
+5. Seamless Actor-Critic updates ✅
 6. Inplace Dropouts ✅
 
 1. "movement is life" concept ❌
