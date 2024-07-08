@@ -8,12 +8,16 @@ It is unification and simplification of Symphony-1.0, Symphony-2.0(2.1) and draf
 I believe that industrial applications need not only a fast growth but an assymptotically stability in the learning process.
 Some ideas were dropped and some proven their worth were solidified:
 
-1. Temporal (Immediate) Advantage
-2. Fading Replay Buffer
-3. Rectified Learnable Sine Wave Activation Function
-4. Rectified Huber Symmetric and Asymmetric Loss Functions
-5. Seamless Actor-Critic update
-6. Inplace Dropouts
+1. Temporal (Immediate) Advantage ✅
+2. Fading Replay Buffer ✅
+3. Rectified Learnable Sine Wave Activation Function ✅
+4. Rectified Huber Symmetric and Asymmetric Loss Functions ✅
+5. Seamless Actor-Critic update ✅
+6. Inplace Dropouts ✅
+
+1. "movement is life" concept ❌
+2. reduced objective to learn Bellman's sum of dumped reward's variance ❌
+3. improve reward variance through immediate Advantage ❌
 
 Some modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule.
 
