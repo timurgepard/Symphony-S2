@@ -7,7 +7,7 @@ It is unification and simplification of Symphony-1.0, Symphony-2.0(2.1) and Symp
 
 Some ideas were dropped and some proven their worth were solidified:
 
-No multi-agents/Without big ensemble of Critics/Model-free/Off-policy
++ No multi-agents/Without big ensemble of Critics/Model-free/Off-policy
 
 1. Temporal (Immediate) Advantage ✅ (though UTD-5, batch size 128>>384)
 2. Fading Replay Buffer ✅
