@@ -18,8 +18,8 @@ Promo: No multi-agents/Without big ensemble of Critics/Model-free/Off-policy/UTD
 6. Inplace Dropouts ✅
 
 1. <del>"movement is life" concept</del> ❌
-2. reduced objective to learn Bellman's sum of dumped reward's variance ❌
-3. improve reward variance through immediate Advantage ❌
+2. <del>reduced objective to learn Bellman's sum of dumped reward's variance</del> ❌
+3. <del>improve reward variance through immediate Advantage</del> ❌
 
 Some modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule.
 
