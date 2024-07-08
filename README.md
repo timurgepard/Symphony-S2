@@ -25,4 +25,4 @@ Some modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule
 Architecture:
 ![image](https://github.com/timurgepard/Symphony-Classic/assets/13238473/459a9e9b-250f-467c-ad04-4d7e76d0f8c7)
 
-PS: Nothing is possible without our Lord and Saviour Jesus Christ.
+
