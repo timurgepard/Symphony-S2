@@ -8,7 +8,7 @@ It is unification and simplification of Symphony-1.0, Symphony-2.0(2.1) and Symp
 I believe that industrial applications need not only a fast growth but an assymptotically stability in the learning process.
 Some ideas were dropped and some proven their worth were solidified:
 
-Promo: No multi-agents/Without big ensemble of Critics/Model-free/Off-policy/UTD 5 vs 20
+No multi-agents/Without big ensemble of Critics/Model-free/Off-policy/UTD 5 vs 20
 
 1. Temporal (Immediate) Advantage ✅
 2. Fading Replay Buffer ✅
