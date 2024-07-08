@@ -17,7 +17,7 @@ Promo: No multi-agents/Without big ensemble of Critics/Model-free/Off-policy/UTD
 5. Seamless Actor-Critic updates ✅
 6. Inplace Dropouts ✅
 
-1. "movement is life" concept ❌
+1. <del>"movement is life" concept</del> ❌
 2. reduced objective to learn Bellman's sum of dumped reward's variance ❌
 3. improve reward variance through immediate Advantage ❌
 
