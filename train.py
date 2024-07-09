@@ -34,11 +34,11 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], False
 
 
-capacity = 200000
+capacity = 1000000
 batch_lim = 384
 fade_factor = 10 # fading memory factor, 1000 - remembers almost everything, 10-12 remembers 45-50%.
 tau = 0.0057
-prob_a = 0.25 #Actor Input Dropout probability
+prob_a = 0.15 #Actor Input Dropout probability
 prob_c = 0.75 #Critic Output Dropout probability
 
 
@@ -60,7 +60,6 @@ elif option == 2:
     env_test = gym.make('Walker2d-v4')
 
 elif option == 3:
-    prob_a = 0.125
     env = gym.make('Humanoid-v4')
     env_test = gym.make('Humanoid-v4')
 
@@ -112,20 +111,18 @@ algo = Symphony(state_dim, action_dim, device, max_action, tau, prob_a, prob_c, 
 
 
 
-#used to create random initalization in Actor -> less dependendance on the specific random seed.
+#used to create random initalization in Actor
 def init_weights(m):
     if isinstance(m, nn.Linear): torch.nn.init.xavier_uniform_(m.weight)
 
 def hard_recovery(algo, replay_buffer):
-    algo.replay_buffer.states = replay_buffer.states
-    algo.replay_buffer.actions = replay_buffer.actions
-    algo.replay_buffer.rewards = replay_buffer.rewards
-    algo.replay_buffer.next_states = replay_buffer.next_states
-    algo.replay_buffer.dones = replay_buffer.dones
-    algo.replay_buffer.indices = replay_buffer.indices
-    algo.replay_buffer.indexes = replay_buffer.indexes
-    algo.replay_buffer.probs = replay_buffer.probs
-    algo.replay_buffer.length = replay_buffer.length
+    algo.replay_buffer.states[:185000] = replay_buffer.states[:185000]
+    algo.replay_buffer.actions[:185000] = replay_buffer.actions[:185000]
+    algo.replay_buffer.rewards[:185000] = replay_buffer.rewards[:185000]
+    algo.replay_buffer.next_states[:185000] = replay_buffer.next_states[:185000]
+    algo.replay_buffer.dones[:185000] = replay_buffer.dones[:185000]
+    algo.replay_buffer.indices[:185000] = replay_buffer.indices[:185000]
+    algo.replay_buffer.length = 185000
     algo.replay_buffer.probs_ready = replay_buffer.probs_ready
     algo.replay_buffer.batch_size = replay_buffer.batch_size
 
@@ -172,7 +169,7 @@ try:
     print("loading buffer...")
     with open('data', 'rb') as file:
         dict = pickle.load(file)
-        algo.replay_buffer = dict['buffer']
+        replay_buffer = dict['buffer']
         #hard_recovery(algo, replay_buffer)
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
@@ -185,6 +182,8 @@ try:
 
 except:
     print("problem during loading buffer")
+
+
 
 try:
     print("loading models...")
@@ -243,7 +242,7 @@ for i in range(start_episode, num_episodes):
     np.random.seed(r2)
     random.seed(r3)
     #--------------------2. CPU/GPU cooling ------------------
-    time.sleep(3.0)
+    time.sleep(0.75)
 
         
     for steps in range(1, limit_step+1):
