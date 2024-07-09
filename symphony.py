@@ -82,11 +82,11 @@ class InplaceDropout(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        self.s = nn.Parameter(data=0.5*torch.rand(hidden_dim)+0.5, requires_grad=False)
+        self.scale = nn.Parameter(data=torch.randn(hidden_dim))
 
     @jit.script_method
     def forward(self, x):
-        scale = self.s
+        scale = torch.sigmoid(1e-4*self.scale)
         x = scale*torch.sin(x/scale)
         return F.prelu(x, 0.1*scale)
 
