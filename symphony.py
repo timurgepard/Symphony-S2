@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import copy
-import math
+import time
 import random
 import torch.nn.functional as F
 import torch.jit as jit
@@ -20,8 +20,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # random seeds
-r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
-#r1, r2, r3 = 268581253, 3930892457, 3743293586
+#r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+r1, r2, r3 = 590334781, 4271685945, 3353565093
 print(r1, ", ", r2, ", ", r3)
 torch.manual_seed(r1)
 np.random.seed(r2)
@@ -82,11 +82,11 @@ class InplaceDropout(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        self.scale = nn.Parameter(data=torch.randn(hidden_dim))
+        self.s = nn.Parameter(data=torch.rand(hidden_dim), requires_grad=False)
 
     @jit.script_method
     def forward(self, x):
-        scale = torch.sigmoid(3e-4*self.scale)
+        scale = torch.sigmoid(self.s)
         x = scale*torch.sin(x/scale)
         return F.prelu(x, 0.1*scale)
 
@@ -225,6 +225,7 @@ class Symphony(object):
 
     def train(self, tr_per_step=5):
         for _ in range(tr_per_step): self.update()
+        #time.sleep(0.05)
 
 
     def update(self):
