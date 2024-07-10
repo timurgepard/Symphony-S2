@@ -4,6 +4,7 @@ import torch.optim as optim
 import numpy as np
 import copy
 import time
+import math
 import random
 import torch.nn.functional as F
 import torch.jit as jit
@@ -20,8 +21,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # random seeds
-#r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
-r1, r2, r3 = 590334781, 4271685945, 3353565093
+r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+#r1, r2, r3 = 590334781, 4271685945, 3353565093
 print(r1, ", ", r2, ", ", r3)
 torch.manual_seed(r1)
 np.random.seed(r2)
@@ -54,24 +55,25 @@ class ReHSE(jit.ScriptModule):
 class ReHAE(jit.ScriptModule):
     def __init__(self):
         super(ReHAE, self).__init__()
+        self.weight = math.sqrt(2)
 
     @jit.script_method
     def forward(self, y1, y2):
-        e = (y1-y2)
+        e = self.weight*(y1-y2)
         e = torch.abs(e)*torch.tanh(e)
         return e.mean()
 
 
 
 #Inplace Dropout function created with the help of ChatGPT
-# It is not recommended to use JIT compilation decorator with random generator as Symphony updates seeds each time
-# We did exception only for this module as it is used inside neural networks.
 # nn.Module -> JIT C++ graph
 class InplaceDropout(jit.ScriptModule):
     def __init__(self, p=0.5):
         super(InplaceDropout, self).__init__()
         self.p = p
 
+    # It is not recommended to use JIT compilation decorator with online random generator as Symphony updates seeds each time
+    # We did exception only for this module as it is used inside neural networks.
     @jit.script_method
     def forward(self, x):
         mask = (torch.rand_like(x) > self.p).float()
@@ -82,13 +84,14 @@ class InplaceDropout(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        self.scale = nn.Parameter(data=torch.randn(hidden_dim))
+        noise = torch.normal(mean=torch.zeros(hidden_dim), std=0.1).clamp(-0.25,0.25)
+        self.k = nn.Parameter(data=0.5+noise, requires_grad=False)
+        
 
     @jit.script_method
     def forward(self, x):
-        scale = torch.sigmoid(1e-4*self.scale)
-        x = scale*torch.sin(x/scale)
-        return F.prelu(x, 0.1*scale)
+        x = self.k*torch.sin(x/self.k)
+        return F.prelu(x, 0.1*self.k)
 
 #Shared Feed Forward Module
 # nn.Module -> JIT C++ graph
@@ -110,9 +113,8 @@ class FeedForward(jit.ScriptModule):
         return self.ffw(x)
 
 
-#We recommend not to JIT compile Actor
-# underlying logic for different shape input is unclear
-class Actor(nn.Module):
+# nn.Module -> JIT C++ graph
+class Actor(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, max_action=1.0, prob=0.25):
         super(Actor, self).__init__()
 
@@ -141,12 +143,12 @@ class Actor(nn.Module):
         self.scale = 0.1*self.max_action
         self.lim = 2.5*self.scale
     
-
+    @jit.script_method
     def forward(self, state):
         x = torch.cat([self.inA(state), self.inB(state), self.inC(state)], dim=-1)
         return self.max_action*self.ffw(x)
     
-    # Do not use any decorators with random generators (Symphony updates seed each time)
+    # Do not use any decorators with online random generators (Symphony updates seed each time)
     def soft(self, state):
         x = self.forward(state)
         x += self.scale*torch.randn_like(x).clamp(-self.lim, self.lim)
