@@ -21,7 +21,7 @@ print(device)
 
 #global parameters
 # environment type. Different Environments have some details that you need to bear in mind.
-option = 2
+option = 3
 
 
 
@@ -34,10 +34,10 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], False
 
 
-capacity = 300000
+capacity = 400000
 batch_lim = 512
-fade_factor = 10 # fading memory factor, 1000 - remembers almost everything, 10-12 remembers 45-50%.
-tau = 0.0057
+fade_factor = 7 # fading memory factor, 1000 - remembers almost everything, 10-12 remembers 45-50%.
+tau = 0.005
 prob_a = 0.15 #Actor Input Dropout probability
 prob_c = 0.75 #Critic Output Dropout probability
 
@@ -118,16 +118,33 @@ algo = Symphony(state_dim, action_dim, device, max_action, tau, prob_a, prob_c, 
 def init_weights(m):
     if isinstance(m, nn.Linear): torch.nn.init.xavier_uniform_(m.weight)
 
-def hard_recovery(algo, replay_buffer):
-    algo.replay_buffer.states = replay_buffer.states
-    algo.replay_buffer.actions = replay_buffer.actions
-    algo.replay_buffer.rewards = replay_buffer.rewards
-    algo.replay_buffer.next_states = replay_buffer.next_states
-    algo.replay_buffer.dones = replay_buffer.dones
-    algo.replay_buffer.indices = replay_buffer.indices
-    algo.replay_buffer.length = replay_buffer.length
+def hard_recovery(algo, replay_buffer, size):
+    algo.replay_buffer.states[:size] = replay_buffer.states[:size]
+    algo.replay_buffer.actions[:size] = replay_buffer.actions[:size]
+    algo.replay_buffer.rewards[:size] = replay_buffer.rewards[:size]
+    algo.replay_buffer.next_states[:size] = replay_buffer.next_states[:size]
+    algo.replay_buffer.dones[:size] = replay_buffer.dones[:size]
+    algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
+    algo.replay_buffer.length = len(replay_buffer.indices)
     algo.replay_buffer.probs_ready = replay_buffer.probs_ready
     algo.replay_buffer.batch_size = replay_buffer.batch_size
+
+
+def explore_copy(rb, e_time, times):
+    for i in range(times):
+        start_time = i*e_time
+        end_time = (i+1)*e_time
+        start_time_c = (i+1)*e_time
+        end_time_c = (i+2)*e_time
+
+        rb.states[start_time_c:end_time_c] = rb.states[start_time:end_time]
+        rb.actions[start_time_c:end_time_c] = rb.actions[start_time:end_time]
+        rb.rewards[start_time_c:end_time_c] = rb.rewards[start_time:end_time]
+        rb.next_states[start_time_c:end_time_c] = rb.next_states[start_time:end_time]
+        rb.dones[start_time_c:end_time_c] = rb.dones[start_time:end_time]
+        rb.indices[start_time_c:end_time_c] = rb.indices[start_time:end_time]
+    rb.length = len(rb.indices)
+
 
 #testing model
 def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
@@ -173,7 +190,7 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        #hard_recovery(algo, replay_buffer)
+        #hard_recovery(algo, replay_buffer, 60000)
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
         total_steps = dict['total_steps']
@@ -226,6 +243,8 @@ if not Q_learning:
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
     total_steps = 0
+    print("copying explore data")
+    explore_copy(algo.replay_buffer, explore_time, 3)
 
 #TRAINING
 print("started training")
