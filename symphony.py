@@ -22,7 +22,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # random seeds
 r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
-#r1, r2, r3 = 590334781, 4271685945, 3353565093
+#r1, r2, r3 = 1282780249, 1651688449, 2088743660
 print(r1, ", ", r2, ", ", r3)
 torch.manual_seed(r1)
 np.random.seed(r2)
@@ -59,7 +59,7 @@ class ReHAE(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, y1, y2):
-        e = self.weight*(y1-y2)
+        e = (y1-y2)
         e = torch.abs(e)*torch.tanh(e)
         return e.mean()
 
@@ -85,7 +85,7 @@ class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
         noise = torch.normal(mean=torch.zeros(hidden_dim), std=0.1).clamp(-0.25,0.25)
-        self.k = nn.Parameter(data=0.5+noise, requires_grad=False)
+        self.k = nn.Parameter(data=0.5+noise, requires_grad=True)
         
 
     @jit.script_method
@@ -181,18 +181,29 @@ class Critic(jit.ScriptModule):
     def forward(self, state, action):
         x = torch.cat([state, action], -1)
         return [net(x) for net in self.nets]
-
+    
+    # take means of 3 distributions and concatenate them (B,3)
+    # with 99% chance return min of 3 distributions (B,1)
+    # with 1% chance return mean between 2 smallest distributions. (B,1)
     @jit.script_method
-    def min(self, state, action):
+    def united(self, state, action, min: bool):
         xs = self.forward(state, action)
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
+        if not min: return self.trun(xs)
         return torch.min(xs, dim=-1, keepdim=True).values
+        
+
+    @jit.script_method
+    def trun(self, xs):
+        xs = torch.sort(xs, dim=-1).values
+        return torch.mean(xs[:,:-1], dim=-1, keepdim=True)
+    
 
 
 
 # Define the algorithm
 class Symphony(object):
-    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.0057, prob_a=0.25, prob_c = 0.75, capacity=200000, batch_lim = 384, fade_factor=10.0):
+    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.005, prob_a=0.15, prob_c = 0.75, capacity=200000, batch_lim = 384, fade_factor=10.0):
 
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity, batch_lim, fade_factor)
 
@@ -237,9 +248,10 @@ class Symphony(object):
             for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param)
         
+
         #Actor Update
         next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.min(next_state, next_action)
+        q_next_target = self.critic_target.united(next_state, next_action, (random.uniform(0,1)>0.01))
         actor_loss = -self.rehae(q_next_target, self.q_next_old_policy)
         
         self.actor_optimizer.zero_grad()
@@ -250,6 +262,7 @@ class Symphony(object):
         q = reward + (1-done) * 0.99 * q_next_target.detach()
         qs = self.critic(state, action)
         critic_loss = self.rehse(q, qs[0]) + self.rehse(q, qs[1]) + self.rehse(q, qs[2])
+
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
