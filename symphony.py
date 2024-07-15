@@ -290,7 +290,6 @@ class ReplayBuffer:
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
         self.fade_factor = fade_factor
-        self.probs_ready = [[]] * capacity
         self.batch_lim = batch_lim
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32).to(device)
@@ -298,16 +297,24 @@ class ReplayBuffer:
         self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32).to(device)
         self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32).to(device)
         self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32).to(device)
-        
+
+    #Normalized index conversion into fading probabilities
+    def fade(self, norm_index):
+        weights = np.tanh(self.fade_factor*norm_index**2.3) # linear / -> non-linear _/‾
+        return weights/np.sum(weights) #probabilities
+
 
     def add(self, state, action, reward, next_state, done):
+        idx = self.length-1
         if self.length<self.capacity:
             self.length += 1
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
+            self.probs = self.fade(self.indexes/self.length)
             self.batch_size = min(max(128, self.length//100), self.batch_lim)
+            
 
-        idx = self.length-1
+        
 
         self.states[idx,:] = torch.FloatTensor(state).to(self.device)
         self.actions[idx,:] = torch.FloatTensor(action).to(self.device)
@@ -323,21 +330,12 @@ class ReplayBuffer:
             self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
             self.dones = torch.roll(self.dones, shifts=-1, dims=0)
 
-    #Normalized index conversion into fading probabilities
-    def fade(self, norm_index):
-        weights = np.tanh(self.fade_factor*norm_index**2.3) # linear / -> non-linear _/‾
-        return weights/np.sum(weights) #probabilities
 
 
-    def generate_probs(self):
-        idx = self.length-1
-        if len(self.probs_ready[idx])>=1: return self.probs_ready[idx]
-        self.probs_ready[idx] = self.fade(self.indexes/self.length) # weights are based solely on the history, highly squashed
-        return self.probs_ready[idx]
-    
+   
     # Do not use any decorators with random generators (Symphony updates seed each time)
     def sample(self):
-        indices = self.random.choice(self.indexes, p=self.generate_probs(), size=self.batch_size)
+        indices = self.random.choice(self.indexes, p=self.probs, size=self.batch_size)
 
         return (
             self.states[indices],
