@@ -38,6 +38,9 @@ class LogFile(object):
 log_name = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
 log_file = LogFile(log_name)
 
+
+
+
 #Rectified Huber Symmetric Error Loss Function via JIT Module
 # nn.Module -> JIT C++ graph
 class ReHSE(jit.ScriptModule):
@@ -84,14 +87,15 @@ class InplaceDropout(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        noise = torch.normal(mean=torch.zeros(hidden_dim), std=0.1).clamp(-0.25,0.25)
-        self.k = nn.Parameter(data=0.5+noise, requires_grad=True)
+        noise = torch.normal(mean=torch.zeros(hidden_dim), std=1.0).clamp(-2.5,2.5)
+        self.s = nn.Parameter(data=noise, requires_grad=True)
         
 
     @jit.script_method
     def forward(self, x):
-        x = self.k*torch.sin(x/self.k)
-        return F.prelu(x, 0.1*self.k)
+        k = torch.sigmoid(0.1*self.s)
+        x = k*torch.sin(x/k)
+        return F.prelu(x, 0.1*k)
 
 #Shared Feed Forward Module
 # nn.Module -> JIT C++ graph
@@ -182,16 +186,21 @@ class Critic(jit.ScriptModule):
         x = torch.cat([state, action], -1)
         return [net(x) for net in self.nets]
     
-    # take means of 3 distributions and concatenate them (B,3)
-    # with 99% chance return min of 3 distributions (B,1)
-    # with 1% chance return mean between 2 smallest distributions. (B,1)
+    # take means of 3 distributions and concatenate them
+    # with 50% chance return min of 3 distributions
+    # with 50% chance return mean between 2 smallest distributions.
     @jit.script_method
     def united(self, state, action, min: bool):
         xs = self.forward(state, action)
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
         if not min: return self.trun(xs)
-        return torch.min(xs, dim=-1, keepdim=True).values
+        return self.min(xs)
         
+
+    @jit.script_method
+    def min(self, xs):
+        return torch.min(xs, dim=-1, keepdim=True).values
+
 
     @jit.script_method
     def trun(self, xs):
@@ -203,7 +212,7 @@ class Critic(jit.ScriptModule):
 
 # Define the algorithm
 class Symphony(object):
-    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.005, prob_a=0.15, prob_c = 0.75, capacity=200000, batch_lim = 384, fade_factor=10.0):
+    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.0057, prob_a=0.25, prob_c = 0.75, capacity=200000, batch_lim = 384, fade_factor=10.0):
 
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity, batch_lim, fade_factor)
 
@@ -251,7 +260,7 @@ class Symphony(object):
 
         #Actor Update
         next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.united(next_state, next_action, (random.uniform(0,1)>0.01))
+        q_next_target = self.critic_target.united(next_state, next_action, (random.uniform(0,1)>0.5))
         actor_loss = -self.rehae(q_next_target, self.q_next_old_policy)
         
         self.actor_optimizer.zero_grad()
@@ -273,15 +282,15 @@ class Symphony(object):
 
 
 
-
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity, batch_lim, fade_factor=7.0):
+
         self.capacity, self.length, self.device = capacity, 0, device
         self.batch_size = min(max(128, self.length//100), batch_lim) #in order for sample to describe population
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
         self.fade_factor = fade_factor
-        self.probs_ready = False
+        self.probs_ready = [[]] * capacity
         self.batch_lim = batch_lim
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32).to(device)
@@ -289,7 +298,7 @@ class ReplayBuffer:
         self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32).to(device)
         self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32).to(device)
         self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32).to(device)
-
+        
 
     def add(self, state, action, reward, next_state, done):
         if self.length<self.capacity:
@@ -314,14 +323,17 @@ class ReplayBuffer:
             self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
             self.dones = torch.roll(self.dones, shifts=-1, dims=0)
 
+    #Normalized index conversion into fading probabilities
+    def fade(self, norm_index):
+        weights = np.tanh(self.fade_factor*norm_index**2.3) # linear / -> non-linear _/‾
+        return weights/np.sum(weights) #probabilities
+
 
     def generate_probs(self):
-        if self.probs_ready: return self.probs
-        def fade(norm_index): return np.tanh(self.fade_factor*norm_index**2.3) # linear / -> non-linear _/‾
-        weights = 1e-7*fade(self.indexes/self.length)# weights are based solely on the history, highly squashed
-        self.probs = weights/np.sum(weights)
-        if self.length>=self.capacity: self.probs_ready = True
-        return self.probs
+        idx = self.length-1
+        if len(self.probs_ready[idx])>=1: return self.probs_ready[idx]
+        self.probs_ready[idx] = self.fade(self.indexes/self.length) # weights are based solely on the history, highly squashed
+        return self.probs_ready[idx]
     
     # Do not use any decorators with random generators (Symphony updates seed each time)
     def sample(self):
