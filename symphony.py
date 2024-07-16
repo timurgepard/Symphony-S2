@@ -260,7 +260,7 @@ class Symphony(object):
 
         #Actor Update
         next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.united(next_state, next_action, (random.uniform(0,1)>0.5))
+        q_next_target = self.critic_target.united(next_state, next_action, (random.uniform(0,1)>0.75))
         actor_loss = -self.rehae(q_next_target, self.q_next_old_policy)
         
         self.actor_optimizer.zero_grad()
@@ -286,7 +286,7 @@ class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity, batch_lim, fade_factor=7.0):
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = min(max(128, self.length//100), batch_lim) #in order for sample to describe population
+        self.batch_size = min(max(200, self.length//100), batch_lim) #in order for sample to describe population
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
         self.fade_factor = fade_factor
@@ -311,10 +311,9 @@ class ReplayBuffer:
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length)
-            self.batch_size = min(max(128, self.length//100), self.batch_lim)
+            self.batch_size = min(max(200, self.length//100), self.batch_lim)
             
 
-        
 
         self.states[idx,:] = torch.FloatTensor(state).to(self.device)
         self.actions[idx,:] = torch.FloatTensor(action).to(self.device)
