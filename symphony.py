@@ -220,7 +220,7 @@ class Symphony(object):
 
         self.critic = Critic(state_dim, action_dim, prob=prob_c).to(device)
         self.critic_target = Critic(state_dim, action_dim, prob=prob_c).to(device)
-        self.critic_target.load_state_dict(self.critic.state_dict())
+        #self.critic_target.load_state_dict(self.critic.state_dict())
 
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=3e-4)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-4)
@@ -261,7 +261,7 @@ class Symphony(object):
 
         #Actor Update
         next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.cmin(next_state, next_action, (random.uniform(0,1)>0.75))
+        q_next_target = self.critic_target.cmin(next_state, next_action, (random.uniform(0,1)<0.25))
         actor_loss = -self.rehae(q_next_target, self.q_next_old_policy)
         
         self.actor_optimizer.zero_grad()
