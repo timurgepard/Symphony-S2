@@ -12,7 +12,7 @@ from symphony import Symphony, log_file
 
 #==============================================================================================
 #==============================================================================================
-#=========================================TRAINING=============================================
+#===================================SCRIPT FOR TRAINING========================================
 #==============================================================================================
 #==============================================================================================
 
@@ -21,7 +21,7 @@ print(device)
 
 #global parameters
 # environment type. Different Environments have some details that you need to bear in mind.
-option = 3
+option = 2
 
 
 
@@ -34,8 +34,8 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], False
 
 
-capacity = 400000
-batch_lim = 512
+capacity = 300000
+batch_lim = 768
 fade_factor = 7 # fading memory factor, 1000 - remembers almost everything, 10-12 remembers 45-50%.
 tau = 0.005
 prob_a = 0.15 #Actor Input Dropout probability
@@ -113,10 +113,11 @@ max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bou
 algo = Symphony(state_dim, action_dim, device, max_action, tau, prob_a, prob_c, capacity, batch_lim, fade_factor)
 
 
-
-#used to create random initalization in Actor
-def init_weights(m):
-    if isinstance(m, nn.Linear): torch.nn.init.xavier_uniform_(m.weight)
+#==============================================================================================
+#==============================================================================================
+#=================================RECOVERY & EXPLORE COPY======================================
+#==============================================================================================
+#==============================================================================================
 
 def hard_recovery(algo, replay_buffer, size):
     algo.replay_buffer.states[:size] = replay_buffer.states[:size]
@@ -145,6 +146,11 @@ def explore_copy(rb, e_time, times):
         rb.indices[start_time_c:end_time_c] = rb.indices[start_time:end_time]
     rb.length = len(rb.indices)
 
+#==============================================================================================
+#==============================================================================================
+#==========================================TESTING=============================================
+#==============================================================================================
+#==============================================================================================
 
 #testing model
 def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
@@ -180,9 +186,13 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
     if save_log: log_file.write(str(current_step) + ": " + str(round(validate_return.item(), 2)) + "\n")
 
 
+#==============================================================================================
+#==============================================================================================
+#=====================LOADING EXISTING MODELS, BUFFER and PARAMETERS===========================
+#==============================================================================================
+#==============================================================================================
 
 
-#--------------------loading existing models, buffer, parameters-------------------------
 total_steps = 0
 
 try:
@@ -204,7 +214,6 @@ except:
     print("problem during loading buffer")
 
 
-
 try:
     print("loading models...")
     algo.actor.load_state_dict(torch.load('actor_model.pt'))
@@ -215,9 +224,16 @@ try:
 except:
     print("problem during loading models")
 
-#-------------------------------------------------------------------------------------
 
-#EXPLORATION
+
+
+#==============================================================================================
+#==============================================================================================
+#========================================EXPLORATION===========================================
+#==============================================================================================
+#==============================================================================================
+
+
 if not Q_learning:
     log_file.write("experiment_started\n")
     total_steps = 0
@@ -246,7 +262,16 @@ if not Q_learning:
     print("copying explore data")
     explore_copy(algo.replay_buffer, explore_time, 3)
 
-#TRAINING
+
+
+#==============================================================================================
+#==============================================================================================
+#=========================================TRAINING=============================================
+#==============================================================================================
+#==============================================================================================
+
+
+
 print("started training")
 #print(f"ReSine scale:\n {algo.actor.ffw[0].ffw[3].scale.cpu().detach().numpy()}")
 
