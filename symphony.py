@@ -190,7 +190,7 @@ class Critic(jit.ScriptModule):
     # with 50% chance return min of 3 distributions
     # with 50% chance return mean between 2 smallest distributions.
     @jit.script_method
-    def united(self, state, action, min: bool):
+    def cmin(self, state, action, min: bool):
         xs = self.forward(state, action)
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
         if not min: return self.trun(xs)
@@ -261,7 +261,7 @@ class Symphony(object):
 
         #Actor Update
         next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.united(next_state, next_action, (random.uniform(0,1)>0.75))
+        q_next_target = self.critic_target.cmin(next_state, next_action, (random.uniform(0,1)>0.75))
         actor_loss = -self.rehae(q_next_target, self.q_next_old_policy)
         
         self.actor_optimizer.zero_grad()
