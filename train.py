@@ -24,7 +24,6 @@ print(device)
 option = 2
 
 
-
 explore_time = 5000
 tr_per_step = 5 # actor-critic updates per frame/step
 limit_step = 1000 #max steps per episode
@@ -36,7 +35,7 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], F
 
 capacity = 300000
 batch_lim = 768
-fade_factor = 7 # fading memory factor, 1000 - remembers almost everything, 10-12 remembers 45-50%.
+fade_factor = 7 # fading memory factor, 7 remembers 25%, 14 remembers 50%.
 tau = 0.005
 prob_a = 0.15 #Actor Input Dropout probability
 prob_c = 0.75 #Critic Output Dropout probability
