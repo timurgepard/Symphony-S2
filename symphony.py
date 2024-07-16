@@ -219,7 +219,8 @@ class Symphony(object):
         self.actor = Actor(state_dim, action_dim, max_action=max_action, prob=prob_a).to(device)
 
         self.critic = Critic(state_dim, action_dim, prob=prob_c).to(device)
-        self.critic_target = copy.deepcopy(self.critic)
+        self.critic_target = Critic(state_dim, action_dim, prob=prob_c).to(device)
+        self.critic_target.load_state_dict(self.critic.state_dict())
 
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=3e-4)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-4)
@@ -310,7 +311,7 @@ class ReplayBuffer:
             self.length += 1
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
-            self.probs = self.fade(self.indexes/self.length)
+            self.probs = self.fade(self.indexes/self.length) if self.length>1 else np.array([0.0])
             self.batch_size = min(max(200, self.length//100), self.batch_lim)
             
 
