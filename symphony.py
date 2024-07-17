@@ -58,6 +58,7 @@ class ReHSE(jit.ScriptModule):
 class ReHAE(jit.ScriptModule):
     def __init__(self):
         super(ReHAE, self).__init__()
+        self.weight = math.sqrt(2)
 
     @jit.script_method
     def forward(self, y1, y2):
@@ -211,7 +212,7 @@ class Critic(jit.ScriptModule):
 
 # Define the algorithm
 class Symphony(object):
-    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.0057, prob_a=0.25, prob_c = 0.75, capacity=200000, batch_lim = 384, fade_factor=10.0):
+    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.005, prob_a=0.15, prob_c = 0.75, capacity=300000, batch_lim = 768, fade_factor=7.0):
 
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity, batch_lim, fade_factor)
 
@@ -260,7 +261,7 @@ class Symphony(object):
 
         #Actor Update
         next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.cmin(next_state, next_action, (random.uniform(0,1)<.3))
+        q_next_target = self.critic_target.cmin(next_state, next_action, (random.uniform(0,1)>0.75))
         actor_loss = -self.rehae(q_next_target, self.q_next_old_policy)
         
         self.actor_optimizer.zero_grad()
