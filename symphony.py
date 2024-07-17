@@ -58,7 +58,6 @@ class ReHSE(jit.ScriptModule):
 class ReHAE(jit.ScriptModule):
     def __init__(self):
         super(ReHAE, self).__init__()
-        self.weight = math.sqrt(2)
 
     @jit.script_method
     def forward(self, y1, y2):
