@@ -187,8 +187,8 @@ class Critic(jit.ScriptModule):
         return [net(x) for net in self.nets]
     
     # take means of 3 distributions and concatenate them
-    # with 30% chance return min of 3 distributions
-    # with 70% chance return mean between 2 smallest distributions.
+    # with 25% chance return min of 3 distributions
+    # with 75% chance return mean between 2 smallest distributions.
     @jit.script_method
     def cmin(self, state, action, min: bool):
         xs = self.forward(state, action)
@@ -220,6 +220,7 @@ class Symphony(object):
 
         self.critic = Critic(state_dim, action_dim, prob=prob_c).to(device)
         self.critic_target = Critic(state_dim, action_dim, prob=prob_c).to(device)
+        self.critic_target.load_state_dict(self.critic.state_dict)
 
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=3e-4)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-4)
@@ -260,7 +261,7 @@ class Symphony(object):
 
         #Actor Update
         next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.cmin(next_state, next_action, (random.uniform(0,1)<.3))
+        q_next_target = self.critic_target.cmin(next_state, next_action, (random.uniform(0,1)>0.75))
         actor_loss = -self.rehae(q_next_target, self.q_next_old_policy)
         
         self.actor_optimizer.zero_grad()
