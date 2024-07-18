@@ -34,7 +34,7 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], F
 
 
 capacity = 300000
-batch_lim = 768
+batch_lim = 576
 fade_factor = 7 # fading memory factor, 7 remembers 25%, 14 remembers 50%.
 tau = 0.005
 prob_a = 0.15 #Actor Input Dropout probability
@@ -110,6 +110,7 @@ print('action space high', env.action_space.high)
 max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else 1.0
 
 algo = Symphony(state_dim, action_dim, device, max_action, tau, prob_a, prob_c, capacity, batch_lim, fade_factor)
+
 
 
 #==============================================================================================
