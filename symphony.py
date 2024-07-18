@@ -178,6 +178,8 @@ class Critic(jit.ScriptModule):
             InplaceDropout(prob)
         )
 
+
+
         self.nets = nn.ModuleList([qA, qB, qC])
 
     @jit.script_method
@@ -213,11 +215,17 @@ class Critic(jit.ScriptModule):
 class Symphony(object):
     def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.005, prob_a=0.15, prob_c = 0.75, capacity=300000, batch_lim = 768, fade_factor=7.0):
 
+        #used to create random initalization
+        def init_weights(m):
+            if isinstance(m, nn.Linear): nn.init.xavier_uniform_(m.weight)
+
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity, batch_lim, fade_factor)
 
         self.actor = Actor(state_dim, action_dim, max_action=max_action, prob=prob_a).to(device)
+        self.actor.apply(init_weights)
 
         self.critic = Critic(state_dim, action_dim, prob=prob_c).to(device)
+        self.critic.apply(init_weights)
         self.critic_target = Critic(state_dim, action_dim, prob=prob_c).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
@@ -235,8 +243,9 @@ class Symphony(object):
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.q_next_old_policy = torch.zeros(1).to(device)
+        self.actor_loss = torch.ones(1).to(device)
         
-        
+
 
 
     def select_action(self, state, mean=False):
@@ -253,6 +262,7 @@ class Symphony(object):
     def update(self):
         state, action, reward, next_state, done = self.replay_buffer.sample()
 
+
         with torch.no_grad():
             for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param)
@@ -260,8 +270,10 @@ class Symphony(object):
 
         #Actor Update
         next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.cmin(next_state, next_action, (random.uniform(0,1)>0.75))
+        q_next_target = self.critic_target.cmin(next_state, next_action, (random.uniform(0,1)<self.replay_buffer.min_decay))
         actor_loss = -self.rehae(q_next_target, self.q_next_old_policy)
+
+        
         
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -279,6 +291,7 @@ class Symphony(object):
 
 
         with torch.no_grad(): self.q_next_old_policy = q_next_target.detach().mean()
+        
 
 
 
@@ -312,6 +325,7 @@ class ReplayBuffer:
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length) if self.length>1 else np.array([0.0])
             self.batch_size = min(max(200, self.length//100), self.batch_lim)
+            self.min_decay = 0.25*math.exp(-self.length/100000)+0.25 # 0.5-> ~0.25
             
 
 
