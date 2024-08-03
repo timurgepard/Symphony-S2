@@ -33,9 +33,9 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], False
 
 
-capacity = 300000
-batch_lim = 576
-fade_factor = 7 # fading memory factor, 7 remembers 25%, 14 remembers 50%.
+capacity = 400000
+batch_lim = 704
+fade_factor = 10 # fading memory factor, 7 remembers 25%, 14 remembers 50% before gradual forgetting
 tau = 0.005
 prob_a = 0.15 #Actor Input Dropout probability
 prob_c = 0.75 #Critic Output Dropout probability
@@ -112,7 +112,6 @@ max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bou
 algo = Symphony(state_dim, action_dim, device, max_action, tau, prob_a, prob_c, capacity, batch_lim, fade_factor)
 
 
-
 #==============================================================================================
 #==============================================================================================
 #=================================RECOVERY & EXPLORE COPY======================================
@@ -127,7 +126,6 @@ def hard_recovery(algo, replay_buffer, size):
     algo.replay_buffer.dones[:size] = replay_buffer.dones[:size]
     algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
     algo.replay_buffer.length = len(replay_buffer.indices)
-    algo.replay_buffer.probs_ready = replay_buffer.probs_ready
     algo.replay_buffer.batch_size = replay_buffer.batch_size
 
 
@@ -269,8 +267,13 @@ if not Q_learning:
 #=========================================TRAINING=============================================
 #==============================================================================================
 #==============================================================================================
-
-
+"""
+def add_train(x):
+    if x>3.0: return 10
+    x2 = x**2
+    k = 1.0 - x2/(x2+1)
+    return int(1 / k)
+"""
 
 print("started training")
 #print(f"ReSine scale:\n {algo.actor.ffw[0].ffw[3].scale.cpu().detach().numpy()}")
@@ -305,9 +308,11 @@ for i in range(start_episode, num_episodes):
                 pickle.dump({'buffer': algo.replay_buffer, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
             
 
+
  
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
+        if done and abs(reward) == 100.0: reward /= 100.0 
         rewards.append(reward)
         algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train(tr_per_step)
