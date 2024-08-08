@@ -35,7 +35,7 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], F
 
 capacity = 400000
 batch_lim = 1024
-fade_factor = 10 # fading memory factor, 7 remembers 25%, 14 remembers 50% before gradual forgetting
+fade_factor = 10 # fading memory factor, flat region before gradual forgeting
 tau = 0.005
 prob_a = 0.15 #Actor Input Dropout probability
 prob_c = 0.75 #Critic Output Dropout probability
