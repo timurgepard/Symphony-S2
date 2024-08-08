@@ -267,10 +267,10 @@ class Symphony(object):
         with torch.no_grad():
             # cut list of the last 3 elements [Qn-3, Qn-2, Qn-1]
             self.q_next_old_policy = self.q_next_old_policy[-3:]
-            # multiply last 3 elements with exp weights and sum creating exponential weighted average
-            ewa = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.04 Qn-3 + 0.175 Qn-2 + 0.785 Qn-1]
+            # multiply last 3 elements with exp weights and sum, creating exponential weighted average
+            ewa = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-3 + 0.21 Qn-2 + 0.73 Qn-1]
             # append new q next target value to the list
-            self.q_next_old_policy.append(q_next_target.detach().mean())
+            self.q_next_old_policy.append(q_next_target.mean().detach())
             # return exp weighted average
             return ewa
 
