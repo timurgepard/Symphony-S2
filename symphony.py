@@ -317,11 +317,11 @@ class ReplayBuffer:
         self.batch_lim = batch_lim
 
 
-        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32).to(device)
-        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32).to(device)
-        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32).to(device)
-        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32).to(device)
-        self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32).to(device)
+        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float16, device=device)
+        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float16, device=device)
+        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float16, device=device)
+        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float16, device=device)
+        self.dones = torch.zeros((self.capacity, 1), dtype=torch.float16, device=device)
 
 
     #Normalized index conversion into fading probabilities
@@ -341,11 +341,11 @@ class ReplayBuffer:
             self.batch_size = min(max(200, self.length//100), self.batch_lim)
 
 
-        self.states[idx,:] = torch.FloatTensor(state).to(self.device)
-        self.actions[idx,:] = torch.FloatTensor(action).to(self.device)
-        self.rewards[idx,:] = torch.FloatTensor([reward]).to(self.device)
-        self.next_states[idx,:] = torch.FloatTensor(next_state).to(self.device)
-        self.dones[idx,:] = torch.FloatTensor([done]).to(self.device)
+        self.states[idx,:] = torch.tensor(state, dtype=torch.float16, device=self.device)
+        self.actions[idx,:] = torch.tensor(action, dtype=torch.float16, device=self.device)
+        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float16, device=self.device)
+        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float16, device=self.device)
+        self.dones[idx,:] = torch.tensor([done], dtype=torch.float16, device=self.device)
 
 
         if self.length==self.capacity:
