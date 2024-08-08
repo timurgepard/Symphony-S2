@@ -147,11 +147,11 @@ class FeedForward(jit.ScriptModule):
         super(FeedForward, self).__init__()
 
         self.ffw = nn.Sequential(
-            nn.Linear(f_in, 320),
-            nn.LayerNorm(320),
-            nn.Linear(320, 256),
-            ReSine(256),
-            nn.Linear(256, 192),
+            nn.Linear(f_in, 384),
+            nn.LayerNorm(384),
+            nn.Linear(384, 288),
+            ReSine(288),
+            nn.Linear(288, 192),
             LinearIDropout(192, f_out, prob),
         )
 
@@ -165,7 +165,7 @@ class Actor(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, max_action=1.0, prob=0.15):
         super(Actor, self).__init__()
 
-        hidden_dim = 320
+        hidden_dim = 384
         
         self.inA = LinearIDropout(state_dim, hidden_dim, prob=0.15)
         self.inB = LinearIDropout(state_dim, hidden_dim, prob=0.15)
