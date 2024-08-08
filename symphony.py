@@ -8,7 +8,6 @@ import random
 import torch.nn.functional as F
 import torch.jit as jit
 
-
 #==============================================================================================
 #==============================================================================================
 #=========================================SYMPHONY=============================================
@@ -58,23 +57,40 @@ class ReHSE(jit.ScriptModule):
 class ReHAE(jit.ScriptModule):
     def __init__(self):
         super(ReHAE, self).__init__()
-        self.x = 0.0
-
-    @jit.script_method
-    def weight(self):
-         with torch.no_grad():
-            self.x += 5e-6
-            x2 = self.x**2
-            return 0.5 + 0.5*x2/(x2+1)
 
     @jit.script_method
     def forward(self, y1, y2):
-        e = 0.5*(y1-y2)
+        e = (y1-y2)
         e = torch.abs(e)*torch.tanh(e)
         return e.mean()
 
 
+#Rectified Huber Symmetric Error Fractional Loss Function via JIT Module
+# nn.Module -> JIT C++ graph
+class ReHSEF(jit.ScriptModule):
+    def __init__(self):
+        super(ReHSEF, self).__init__()
+        self.p = 95/100
 
+    @jit.script_method
+    def forward(self, y1, y2):
+        ae = torch.abs(y1-y2) + 1e-6
+        ae = ae**self.p*torch.tanh(self.p*ae)
+        return ae.mean()
+
+
+#Rectified Huber Asymmetric Error Fractional Loss Function via JIT Module
+# nn.Module -> JIT C++ graph
+class ReHAEF(jit.ScriptModule):
+    def __init__(self):
+        super(ReHAEF, self).__init__()
+        self.p = 95/100
+
+    @jit.script_method
+    def forward(self, y1, y2):
+        e = (y1-y2) + 1e-6
+        e = torch.abs(e)**self.p*torch.tanh(self.p*e)
+        return e.mean()
 
 
 #Inplace Dropout function created with the help of ChatGPT
@@ -110,7 +126,8 @@ class LinearIDropout(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        noise = torch.normal(mean=torch.zeros(hidden_dim), std=1.0).clamp(-2.5,2.5)
+        stdev = math.sqrt(1/hidden_dim)
+        noise = torch.normal(mean=torch.zeros(hidden_dim), std=stdev).clamp(-3.0*stdev,3.0*stdev)
         self.s = nn.Parameter(data=noise, requires_grad=True)
         
 
@@ -130,9 +147,9 @@ class FeedForward(jit.ScriptModule):
         super(FeedForward, self).__init__()
 
         self.ffw = nn.Sequential(
-            nn.Linear(f_in, 384),
-            nn.LayerNorm(384),
-            nn.Linear(384, 256),
+            nn.Linear(f_in, 320),
+            nn.LayerNorm(320),
+            nn.Linear(320, 256),
             ReSine(256),
             nn.Linear(256, 192),
             LinearIDropout(192, f_out, prob),
@@ -148,7 +165,7 @@ class Actor(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, max_action=1.0, prob=0.15):
         super(Actor, self).__init__()
 
-        hidden_dim = 384
+        hidden_dim = 320
         
         self.inA = LinearIDropout(state_dim, hidden_dim, prob=0.15)
         self.inB = LinearIDropout(state_dim, hidden_dim, prob=0.15)
@@ -161,7 +178,7 @@ class Actor(jit.ScriptModule):
 
         self.max_action = torch.mean(max_action).item()
         self.scale = 0.1*self.max_action
-        self.lim = 2.5*self.scale
+        self.lim = 3.0*self.scale
     
     @jit.script_method
     def forward(self, state):
@@ -219,8 +236,8 @@ class Symphony(object):
         self.critic_optimizer = optim.AdamW(self.critic.parameters(), lr=3e-4)
         self.actor_optimizer = optim.AdamW(self.actor.parameters(), lr=3e-4)
 
-        self.rehse = ReHSE()
-        self.rehae = ReHAE()
+        self.rehsef = ReHSEF()
+        self.rehaef = ReHAEF()
 
 
         self.max_action = max_action
@@ -231,7 +248,7 @@ class Symphony(object):
         self.action_dim = action_dim
         self.q_next_old_policy = [0.0, 0.0, 0.0]
         self.weights =  torch.FloatTensor([0.06, 0.21, 0.73])
-        self.zero =  torch.FloatTensor([0.0]).to(device)
+        self.scaler = torch.cuda.amp.GradScaler()
         
 
 
@@ -239,6 +256,7 @@ class Symphony(object):
         state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
         with torch.no_grad(): action = self.actor(state) if mean else self.actor.soft(state)
         return action.cpu().data.numpy().flatten()
+
 
 
     def train(self, tr_per_step=5):
@@ -258,38 +276,32 @@ class Symphony(object):
 
     def update(self):
         state, action, reward, next_state, done = self.replay_buffer.sample()
+        self.actor_optimizer.zero_grad(set_to_none=True)
+        self.critic_optimizer.zero_grad(set_to_none=True)
 
-        
         with torch.no_grad():
             for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param)
 
+        
+        with torch.cuda.amp.autocast(dtype=torch.float16):
+            next_action = self.actor.soft(next_state)
+            q_next_target = self.critic_target.cmin(next_state, next_action)
+            actor_loss = -self.rehaef(q_next_target, 0.95*self.q_next_prev(q_next_target))
+
+            q = reward + (1-done) * 0.99 * q_next_target.detach()
+            qs = self.critic(state, action)
+            critic_loss = self.rehsef(q, qs[0]) + self.rehsef(q, qs[1]) + self.rehsef(q, qs[2])
 
         #Actor Update
-        next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.cmin(next_state, next_action)
-        actor_loss = -self.rehae(q_next_target, 0.95*self.q_next_prev(q_next_target))
-
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        self.actor_optimizer.step()
+        self.scaler.scale(actor_loss).backward()
+        self.scaler.step(self.actor_optimizer)
 
         #Critic Update
-        q = reward + (1-done) * 0.99 * q_next_target.detach()
-        qs = self.critic(state, action)
-        critic_loss = self.rehse(q, qs[0]) + self.rehse(q, qs[1]) + self.rehse(q, qs[2])
-
-
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        self.critic_optimizer.step()
-
-
-
+        self.scaler.scale(critic_loss).backward()
+        self.scaler.step(self.critic_optimizer)
         
-            
-            
-
+        self.scaler.update()
 
 
 
