@@ -34,7 +34,7 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], F
 
 
 capacity = 400000
-batch_lim = 704
+batch_lim = 1024
 fade_factor = 10 # fading memory factor, 7 remembers 25%, 14 remembers 50% before gradual forgetting
 tau = 0.005
 prob_a = 0.15 #Actor Input Dropout probability
@@ -111,6 +111,12 @@ max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bou
 
 algo = Symphony(state_dim, action_dim, device, max_action, tau, prob_a, prob_c, capacity, batch_lim, fade_factor)
 
+
+def init_weights(m):
+    if isinstance(m, nn.Linear): m.weight = torch.nn.init.xavier_uniform_(m.weight)/explore_time
+
+def add_weights(m):
+    if isinstance(m, nn.Linear): m.weight = m.weight + torch.nn.init.xavier_uniform_(m.weight)/explore_time
 
 #==============================================================================================
 #==============================================================================================
@@ -198,7 +204,7 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        #hard_recovery(algo, replay_buffer, 60000)
+        #hard_recovery(algo, dict['buffer'], 100000) # comment the previous line and chose a memory size to recover from old buffer
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
         total_steps = dict['total_steps']
@@ -235,18 +241,33 @@ except:
 if not Q_learning:
     log_file.write("experiment_started\n")
     total_steps = 0
+
+    algo.actor.apply(init_weights)
+    algo.critic.apply(init_weights)
+    algo.critic_target.load_state_dict(algo.critic.state_dict())
+
     while not Q_learning:
         rewards = []
         state = env.reset()[0]
-        #----------------------------pre-processing------------------------------
-        #---------------------1. decreases dependence on random seed: ---------------
-        r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
-        torch.manual_seed(r1)
-        np.random.seed(r2)
-        random.seed(r3)
+
+
+
 
         for steps in range(1, limit_step+1):
             total_steps += 1
+
+            #---------------------decreases dependence on random seed: ---------------
+            r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+            torch.manual_seed(r1)
+            np.random.seed(r2)
+            random.seed(r3)
+
+            #------------------learning will not depend on initial weights------------------------
+            algo.actor.apply(add_weights)
+            algo.critic.apply(add_weights)
+            algo.critic_target.load_state_dict(algo.critic.state_dict())
+           
+
             if total_steps>=explore_time and not Q_learning: Q_learning = True
             action = max_action.numpy()*np.random.uniform(-0.5, 1.0, size=action_dim)
             next_state, reward, done, truncated, info = env.step(action)
@@ -256,9 +277,12 @@ if not Q_learning:
             if done: break
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
+    
     total_steps = 0
     print("copying explore data")
     explore_copy(algo.replay_buffer, explore_time, 3)
+    
+    
 
 
 
@@ -267,13 +291,7 @@ if not Q_learning:
 #=========================================TRAINING=============================================
 #==============================================================================================
 #==============================================================================================
-"""
-def add_train(x):
-    if x>3.0: return 10
-    x2 = x**2
-    k = 1.0 - x2/(x2+1)
-    return int(1 / k)
-"""
+
 
 print("started training")
 #print(f"ReSine scale:\n {algo.actor.ffw[0].ffw[3].scale.cpu().detach().numpy()}")
@@ -286,11 +304,7 @@ for i in range(start_episode, num_episodes):
     episode_steps = 0
 
     #----------------------------pre-processing------------------------------
-    #---------------------1. decreases dependence on random seed: ---------------
-    r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
-    torch.manual_seed(r1)
-    np.random.seed(r2)
-    random.seed(r3)
+
     #--------------------2. CPU/GPU cooling ------------------
     time.sleep(0.75)
 
@@ -298,6 +312,12 @@ for i in range(start_episode, num_episodes):
     for steps in range(1, limit_step+1):
         episode_steps += 1
         total_steps += 1
+
+        #---------------------1. decreases dependence on random seed: ---------------
+        r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+        torch.manual_seed(r1)
+        np.random.seed(r2)
+        random.seed(r3)
 
         if (total_steps>=1250 and total_steps%1250==0):
             testing(env_test, limit_step=limit_eval, test_episodes=100, current_step=total_steps, save_log=True)
@@ -312,7 +332,7 @@ for i in range(start_episode, num_episodes):
  
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
-        if done and abs(reward) == 100.0: reward /= 100.0 
+        #if done and abs(reward) == 100.0: reward /= 100.0 
         rewards.append(reward)
         algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train(tr_per_step)
