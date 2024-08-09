@@ -70,12 +70,12 @@ class ReHAE(jit.ScriptModule):
 class ReHSEF(jit.ScriptModule):
     def __init__(self):
         super(ReHSEF, self).__init__()
-        self.p = 95/100
+        self.p = 0.95
 
     @jit.script_method
     def forward(self, y1, y2):
         ae = torch.abs(y1-y2) + 1e-6
-        ae = ae**self.p*torch.tanh(self.p*ae)
+        ae = ae**self.p*torch.tanh(self.p*ae/3)
         return ae.mean()
 
 
@@ -84,12 +84,12 @@ class ReHSEF(jit.ScriptModule):
 class ReHAEF(jit.ScriptModule):
     def __init__(self):
         super(ReHAEF, self).__init__()
-        self.p = 95/100
+        self.p = 0.95
 
     @jit.script_method
     def forward(self, y1, y2):
         e = (y1-y2) + 1e-6
-        e = torch.abs(e)**self.p*torch.tanh(self.p*e)
+        e = torch.abs(e)**self.p*torch.tanh(self.p*e/3)
         return e.mean()
 
 
@@ -147,11 +147,11 @@ class FeedForward(jit.ScriptModule):
         super(FeedForward, self).__init__()
 
         self.ffw = nn.Sequential(
-            nn.Linear(f_in, 384),
-            nn.LayerNorm(384),
-            nn.Linear(384, 288),
-            ReSine(288),
-            nn.Linear(288, 192),
+            nn.Linear(f_in, 320),
+            nn.LayerNorm(320),
+            nn.Linear(320, 256),
+            ReSine(256),
+            nn.Linear(256, 192),
             LinearIDropout(192, f_out, prob),
         )
 
@@ -165,7 +165,7 @@ class Actor(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, max_action=1.0, prob=0.15):
         super(Actor, self).__init__()
 
-        hidden_dim = 384
+        hidden_dim = 320
         
         self.inA = LinearIDropout(state_dim, hidden_dim, prob=0.15)
         self.inB = LinearIDropout(state_dim, hidden_dim, prob=0.15)
@@ -284,7 +284,7 @@ class Symphony(object):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param)
 
         
-        with torch.cuda.amp.autocast(dtype=torch.float16):
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             next_action = self.actor.soft(next_state)
             q_next_target = self.critic_target.cmin(next_state, next_action)
             actor_loss = -self.rehaef(q_next_target, 0.95*self.q_next_prev(q_next_target))
@@ -317,11 +317,11 @@ class ReplayBuffer:
         self.batch_lim = batch_lim
 
 
-        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float16, device=device)
-        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float16, device=device)
-        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float16, device=device)
-        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float16, device=device)
-        self.dones = torch.zeros((self.capacity, 1), dtype=torch.float16, device=device)
+        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.bfloat16, device=device)
+        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.bfloat16, device=device)
+        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.bfloat16, device=device)
+        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.bfloat16, device=device)
+        self.dones = torch.zeros((self.capacity, 1), dtype=torch.bfloat16, device=device)
 
 
     #Normalized index conversion into fading probabilities
@@ -339,13 +339,13 @@ class ReplayBuffer:
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length) if self.length>1 else np.array([0.0])
             self.batch_size = min(max(200, self.length//100), self.batch_lim)
+        
 
-
-        self.states[idx,:] = torch.tensor(state, dtype=torch.float16, device=self.device)
-        self.actions[idx,:] = torch.tensor(action, dtype=torch.float16, device=self.device)
-        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float16, device=self.device)
-        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float16, device=self.device)
-        self.dones[idx,:] = torch.tensor([done], dtype=torch.float16, device=self.device)
+        self.states[idx,:] = torch.tensor(state, dtype=torch.bfloat16, device=self.device)
+        self.actions[idx,:] = torch.tensor(action, dtype=torch.bfloat16, device=self.device)
+        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.bfloat16, device=self.device)
+        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.bfloat16, device=self.device)
+        self.dones[idx,:] = torch.tensor([done], dtype=torch.bfloat16, device=self.device)
 
 
         if self.length==self.capacity:
