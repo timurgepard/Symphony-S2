@@ -70,12 +70,11 @@ class ReHAE(jit.ScriptModule):
 class ReHSEF(jit.ScriptModule):
     def __init__(self):
         super(ReHSEF, self).__init__()
-        self.p = 0.95
 
     @jit.script_method
     def forward(self, y1, y2):
         ae = torch.abs(y1-y2) + 1e-6
-        ae = ae**self.p*torch.tanh(self.p*ae/3)
+        ae = ae**1.2*torch.tanh(ae/2)
         return ae.mean()
 
 
@@ -84,12 +83,11 @@ class ReHSEF(jit.ScriptModule):
 class ReHAEF(jit.ScriptModule):
     def __init__(self):
         super(ReHAEF, self).__init__()
-        self.p = 0.95
 
     @jit.script_method
     def forward(self, y1, y2):
         e = (y1-y2) + 1e-6
-        e = torch.abs(e)**self.p*torch.tanh(self.p*e/3)
+        e = torch.abs(e)**1.2*torch.tanh(e/2)
         return e.mean()
 
 
@@ -162,14 +160,14 @@ class FeedForward(jit.ScriptModule):
 
 # nn.Module -> JIT C++ graph
 class Actor(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, max_action=1.0, prob=0.15):
+    def __init__(self, state_dim, action_dim, max_action=1.0):
         super(Actor, self).__init__()
 
         hidden_dim = 320
         
-        self.inA = LinearIDropout(state_dim, hidden_dim, prob=0.15)
-        self.inB = LinearIDropout(state_dim, hidden_dim, prob=0.15)
-        self.inC = LinearIDropout(state_dim, hidden_dim, prob=0.15)
+        self.inA = LinearIDropout(state_dim, hidden_dim, prob=0.2)
+        self.inB = LinearIDropout(state_dim, hidden_dim, prob=0.2)
+        self.inC = LinearIDropout(state_dim, hidden_dim, prob=0.2)
         
         
         self.ffw = FeedForward(3*hidden_dim, action_dim, prob=0.5)
@@ -195,13 +193,14 @@ class Actor(jit.ScriptModule):
 
 # nn.Module -> JIT C++ graph
 class Critic(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, prob=0.75):
+    def __init__(self, state_dim, action_dim):
         super(Critic, self).__init__()
 
 
         qA = FeedForward(state_dim+action_dim, 128, prob=0.75)
         qB = FeedForward(state_dim+action_dim, 128, prob=0.75)
         qC = FeedForward(state_dim+action_dim, 128, prob=0.75)
+
 
         self.nets = nn.ModuleList([qA, qB, qC])
 
@@ -216,26 +215,28 @@ class Critic(jit.ScriptModule):
         xs = self.forward(state, action)
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
         xs = torch.sort(xs, dim=-1).values
-        return (0.73*xs[:,0]+0.21*xs[:,1]+0.06*xs[:,2]).unsqueeze(1)
+        return (0.71*xs[:,0]+0.2*xs[:,1]+0.06*xs[:,2]).unsqueeze(1)
     
 
 
 
 # Define the algorithm
 class Symphony(object):
-    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.005, prob_a=0.15, prob_c = 0.75, capacity=300000, batch_lim = 768, fade_factor=7.0):
+    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.005, capacity=300000, batch_lim = 768, fade_factor=7.0):
 
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity, batch_lim, fade_factor)
 
-        self.actor = Actor(state_dim, action_dim, max_action=max_action, prob=prob_a).to(device)
+        self.actor = Actor(state_dim, action_dim, max_action=max_action,).to(device)
 
-        self.critic = Critic(state_dim, action_dim, prob=prob_c).to(device)
-        self.critic_target = Critic(state_dim, action_dim, prob=prob_c).to(device)
+        self.critic = Critic(state_dim, action_dim).to(device)
+        self.critic_target = Critic(state_dim, action_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         self.critic_optimizer = optim.AdamW(self.critic.parameters(), lr=3e-4)
         self.actor_optimizer = optim.AdamW(self.actor.parameters(), lr=3e-4)
 
+        self.rehse = ReHSE()
+        self.rehae = ReHAE()
         self.rehsef = ReHSEF()
         self.rehaef = ReHAEF()
 
@@ -247,7 +248,7 @@ class Symphony(object):
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.q_next_old_policy = [0.0, 0.0, 0.0]
-        self.weights =  torch.FloatTensor([0.06, 0.21, 0.73])
+        self.weights =  torch.FloatTensor([0.06, 0.2, 0.71])
         self.scaler = torch.cuda.amp.GradScaler()
         
 
@@ -265,10 +266,10 @@ class Symphony(object):
 
     def q_next_prev(self, q_next_target):
         with torch.no_grad():
-            # cut list of the last 3 elements [Qn-3, Qn-2, Qn-1]
+            # cut list of the last 5 elements [Qn-3, Qn-2, Qn-1]
             self.q_next_old_policy = self.q_next_old_policy[-3:]
-            # multiply last 3 elements with exp weights and sum, creating exponential weighted average
-            ewa = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-3 + 0.21 Qn-2 + 0.73 Qn-1]
+            # multiply last 5 elements with exp weights and sum, creating exponential weighted average
+            ewa = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-3 + 0.2 Qn-2 + 0.71 Qn-1]
             # append new q next target value to the list
             self.q_next_old_policy.append(q_next_target.mean().detach())
             # return exp weighted average
@@ -287,7 +288,7 @@ class Symphony(object):
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             next_action = self.actor.soft(next_state)
             q_next_target = self.critic_target.cmin(next_state, next_action)
-            actor_loss = -self.rehaef(q_next_target, 0.95*self.q_next_prev(q_next_target))
+            actor_loss = -self.rehaef(q_next_target, self.q_next_prev(q_next_target))
 
             q = reward + (1-done) * 0.99 * q_next_target.detach()
             qs = self.critic(state, action)
