@@ -165,13 +165,16 @@ class Actor(jit.ScriptModule):
 
         hidden_dim = 320
         
-        self.inA = LinearIDropout(state_dim, hidden_dim, prob=0.2)
-        self.inB = LinearIDropout(state_dim, hidden_dim, prob=0.2)
-        self.inC = LinearIDropout(state_dim, hidden_dim, prob=0.2)
+        self.inA = LinearIDropout(state_dim, hidden_dim, prob=0.15)
+        self.inB = LinearIDropout(state_dim, hidden_dim, prob=0.15)
+        self.inC = LinearIDropout(state_dim, hidden_dim, prob=0.15)
         
         
-        self.ffw = FeedForward(3*hidden_dim, action_dim, prob=0.5)
-        self.tanh = nn.Tanh()
+        self.net = nn.Sequential(
+            FeedForward(3*hidden_dim, 128, prob=0.75),
+            nn.Linear(128, action_dim),
+            nn.Tanh()
+        )
 
 
         self.max_action = torch.mean(max_action).item()
@@ -181,7 +184,7 @@ class Actor(jit.ScriptModule):
     @jit.script_method
     def forward(self, state):
         x = torch.cat([self.inA(state), self.inB(state), self.inC(state)], dim=-1)
-        return self.max_action*self.tanh(self.ffw(x))
+        return self.max_action*self.net(x)
     
     # Do not use any decorators with online random generators (Symphony updates seed each time)
     def soft(self, state):
@@ -215,7 +218,7 @@ class Critic(jit.ScriptModule):
         xs = self.forward(state, action)
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
         xs = torch.sort(xs, dim=-1).values
-        return (0.71*xs[:,0]+0.2*xs[:,1]+0.06*xs[:,2]).unsqueeze(1)
+        return (0.73*xs[:,0]+0.21*xs[:,1]+0.06*xs[:,2]).unsqueeze(1)
     
 
 
@@ -248,7 +251,7 @@ class Symphony(object):
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.q_next_old_policy = [0.0, 0.0, 0.0]
-        self.weights =  torch.FloatTensor([0.06, 0.2, 0.71])
+        self.weights =  torch.FloatTensor([0.06, 0.21, 0.73])
         self.scaler = torch.cuda.amp.GradScaler()
         
 
@@ -288,7 +291,7 @@ class Symphony(object):
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             next_action = self.actor.soft(next_state)
             q_next_target = self.critic_target.cmin(next_state, next_action)
-            actor_loss = -self.rehaef(q_next_target, self.q_next_prev(q_next_target))
+            actor_loss = -self.rehaef(q_next_target, 0.99*self.q_next_prev(q_next_target))
 
             q = reward + (1-done) * 0.99 * q_next_target.detach()
             qs = self.critic(state, action)
