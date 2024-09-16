@@ -303,7 +303,7 @@ class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity, batch_lim, fade_factor=7.0):
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = min(max(128, self.length//300), batch_lim) #in order for sample to describe population
+        self.batch_size = min(max(128, self.length//250), batch_lim) #in order for sample to describe population
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
         self.fade_factor = fade_factor
@@ -332,7 +332,7 @@ class ReplayBuffer:
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length) if self.length>1 else np.array([0.0])
-            self.batch_size = min(max(128, self.length//300), self.batch_lim)
+            self.batch_size = min(max(128, self.length//250), self.batch_lim)
             self.ratio = self.length/self.capacity
 
         
