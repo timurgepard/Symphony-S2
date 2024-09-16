@@ -7,6 +7,7 @@ import gymnasium as gym
 import random
 import pickle
 import time
+import math
 from symphony import Symphony, log_file
 
 
@@ -21,7 +22,7 @@ print(device)
 
 #global parameters
 # environment type.
-option = 2
+option = 3
 
 
 explore_time = 5000
@@ -33,12 +34,10 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], False
 
 
-capacity = 400000
-batch_lim = 768
+capacity = 384000
+batch_lim = 1280
 fade_factor = 10 # fading memory factor, flat region before gradual forgeting
 tau = 0.005
-prob_a = 0.15 #Actor Input Dropout probability
-prob_c = 0.75 #Critic Output Dropout probability
 
 
 
@@ -109,14 +108,18 @@ action_dim= env.action_space.shape[0]
 print('action space high', env.action_space.high)
 max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else 1.0
 
-algo = Symphony(state_dim, action_dim, device, max_action, tau, prob_a, prob_c, capacity, batch_lim, fade_factor)
+algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity, batch_lim, fade_factor)
 
 
 def init_weights(m):
-    if isinstance(m, nn.Linear): m.weight = torch.nn.init.xavier_uniform_(m.weight)/explore_time
+    if isinstance(m, nn.Linear): m.weight = torch.nn.init.xavier_uniform_(m.weight)
 
 def add_weights(m):
-    if isinstance(m, nn.Linear): m.weight = m.weight + torch.nn.init.xavier_uniform_(m.weight)/explore_time
+    if isinstance(m, nn.Linear): m.weight += torch.nn.init.xavier_uniform_(m.weight)
+
+def scale_weights(m):
+    if isinstance(m, nn.Linear): m.weight = m.weight/explore_time
+
 
 #==============================================================================================
 #==============================================================================================
@@ -164,17 +167,16 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
 
     for test_episode in range(test_episodes):
 
-        #---------------------1. decreases dependence on random seed: ---------------
-        r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
-        #print(r1, ", ", r2, ", ", r3)
-        torch.manual_seed(r1)
-        np.random.seed(r2)
-        random.seed(r3)
-
         state = env.reset()[0]
         rewards = []
 
         for steps in range(1,limit_step+1):
+
+            r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+            torch.manual_seed(r1)
+            np.random.seed(r2)
+            random.seed(r3)
+
             action = algo.select_action(state, mean=True)
             next_state, reward, done, truncated, info = env.step(action)
             rewards.append(reward)
@@ -244,14 +246,11 @@ if not Q_learning:
 
     algo.actor.apply(init_weights)
     algo.critic.apply(init_weights)
-    algo.critic_target.load_state_dict(algo.critic.state_dict())
+
 
     while not Q_learning:
         rewards = []
         state = env.reset()[0]
-
-
-
 
         for steps in range(1, limit_step+1):
             total_steps += 1
@@ -265,19 +264,25 @@ if not Q_learning:
             #------------------learning will not depend on initial weights------------------------
             algo.actor.apply(add_weights)
             algo.critic.apply(add_weights)
-            algo.critic_target.load_state_dict(algo.critic.state_dict())
-           
+          
 
             if total_steps>=explore_time and not Q_learning: Q_learning = True
             action = max_action.numpy()*np.random.uniform(-0.5, 1.0, size=action_dim)
             next_state, reward, done, truncated, info = env.step(action)
+            
             rewards.append(reward)
+            if done and abs(reward) == 100.0: reward /= 100.0 
             algo.replay_buffer.add(state, action, reward, next_state, done)
             state = next_state
             if done: break
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
-    
+
+
+    algo.actor.apply(scale_weights)
+    algo.critic.apply(scale_weights)
+    algo.critic_target.load_state_dict(algo.critic.state_dict())
+
     total_steps = 0
     print("copying explore data")
     explore_copy(algo.replay_buffer, explore_time, 3)
@@ -320,11 +325,12 @@ for i in range(start_episode, num_episodes):
         random.seed(r3)
 
         if (total_steps>=1250 and total_steps%1250==0):
+            part = "_"+str(total_steps/1000) if total_steps%50000==0 else ""
             testing(env_test, limit_step=limit_eval, test_episodes=100, current_step=total_steps, save_log=True)
-            torch.save(algo.actor.state_dict(), 'actor_model.pt')
-            torch.save(algo.critic.state_dict(), 'critic_model.pt')
-            torch.save(algo.critic_target.state_dict(), 'critic_target_model.pt')
-            with open('data', 'wb') as file:
+            torch.save(algo.actor.state_dict(), 'actor_model'+ part +'.pt')
+            torch.save(algo.critic.state_dict(), 'critic_model'+ part +'.pt')
+            torch.save(algo.critic_target.state_dict(), 'critic_target_model'+ part +'.pt')
+            with open('data'+ part, 'wb') as file:
                 pickle.dump({'buffer': algo.replay_buffer, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
             
 
@@ -332,8 +338,8 @@ for i in range(start_episode, num_episodes):
  
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
-        #if done and abs(reward) == 100.0: reward /= 100.0 
         rewards.append(reward)
+        if done and abs(reward) == 100.0: reward /= 100.0 
         algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train(tr_per_step)
         state = next_state
