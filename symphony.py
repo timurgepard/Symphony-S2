@@ -19,7 +19,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # random seeds
-#r1, r2, r3 = 2, 0, 2
+#r1, r2, r3 = 7, 1, 0
 r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
 #r1, r2, r3 = (r1+r1_), (r2+r2_), (r3+r3_)
 print(r1, ", ", r2, ", ", r3)
@@ -38,7 +38,6 @@ log_name = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
 log_file = LogFile(log_name)
 
 
-
 #Rectified Huber Symmetric Error Loss Function via JIT Module
 # nn.Module -> JIT C++ graph
 class ReHSE(jit.ScriptModule):
@@ -46,9 +45,9 @@ class ReHSE(jit.ScriptModule):
         super(ReHSE, self).__init__()
 
     @jit.script_method
-    def forward(self, y1, y2):
-        ae = torch.abs(y1-y2)
-        ae = ae*torch.tanh(ae)
+    def forward(self, y1, y2, k:float):
+        ae = torch.abs(y1-y2) + 1e-6
+        ae = ae**k*torch.tanh(k*ae)
         return ae.mean()
 
 
@@ -59,75 +58,56 @@ class ReHAE(jit.ScriptModule):
         super(ReHAE, self).__init__()
 
     @jit.script_method
-    def forward(self, y1, y2):
-        e = (y1-y2)
-        e = torch.abs(e)*torch.tanh(e)
-        return e.mean()
-
-
-#Rectified Huber Symmetric Error Fractional Loss Function via JIT Module
-# nn.Module -> JIT C++ graph
-class ReHSEF(jit.ScriptModule):
-    def __init__(self):
-        super(ReHSEF, self).__init__()
-
-    @jit.script_method
-    def forward(self, y1, y2):
-        ae = torch.abs(y1-y2) + 1e-6
-        ae = ae**1.2*torch.tanh(ae/2)
-        return ae.mean()
-
-
-#Rectified Huber Asymmetric Error Fractional Loss Function via JIT Module
-# nn.Module -> JIT C++ graph
-class ReHAEF(jit.ScriptModule):
-    def __init__(self):
-        super(ReHAEF, self).__init__()
-
-    @jit.script_method
-    def forward(self, y1, y2):
+    def forward(self, y1, y2, k:float):
         e = (y1-y2) + 1e-6
-        e = torch.abs(e)**1.2*torch.tanh(e/2)
+        e = torch.abs(e)**k*torch.tanh(k*e)
         return e.mean()
+
+
+
+
+
 
 
 #Inplace Dropout function created with the help of ChatGPT
 # nn.Module -> JIT C++ graph
 class InplaceDropout(jit.ScriptModule):
-    def __init__(self, prob=0.5):
+    def __init__(self, p=0.5):
         super(InplaceDropout, self).__init__()
-        self.prob = prob
+        self.p = p
 
     # It is not recommended to use JIT compilation decorator with online random generator as Symphony updates seeds each time
     # We did exception only for this module as it is used inside neural networks.
     @jit.script_method
     def forward(self, x):
-        mask = (torch.rand_like(x) > self.prob).float()
+        mask = (torch.rand_like(x) > self.p).float()
         return  mask * x + (1.0-mask) * x.detach()
 
 #Linear followed by Inplace Dropout
 # nn.Module -> JIT C++ graph
 class LinearIDropout(jit.ScriptModule):
-    def __init__(self, f_in, f_out, prob=0.5):
+    def __init__(self, f_in, f_out, p=0.5):
         super(LinearIDropout, self).__init__()
         self.ffw = nn.Linear(f_in, f_out)
-        self.prob = prob
+        self.p = p
 
     @jit.script_method
     def forward(self, x):
         x = self.ffw(x)
-        mask = (torch.rand_like(x) > self.prob).float()
+        mask = (torch.rand_like(x) > self.p).float()
         return  mask * x + (1.0-mask) * x.detach()
-    
+
+
+
 #ReSine Activation Function
 # nn.Module -> JIT C++ graph
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
         stdev = math.sqrt(1/hidden_dim)
-        noise = torch.normal(mean=torch.zeros(hidden_dim), std=stdev).clamp(-3.0*stdev,3.0*stdev)
+        noise = torch.normal(mean=torch.zeros(hidden_dim), std=stdev).clamp(-3.0*stdev, 3.0*stdev)
         self.s = nn.Parameter(data=noise, requires_grad=True)
-        
+
 
     @jit.script_method
     def forward(self, x):
@@ -141,7 +121,7 @@ class ReSine(jit.ScriptModule):
 #Shared Feed Forward Module
 # nn.Module -> JIT C++ graph
 class FeedForward(jit.ScriptModule):
-    def __init__(self, f_in, f_out, prob=0.5):
+    def __init__(self, f_in, f_out):
         super(FeedForward, self).__init__()
 
         self.ffw = nn.Sequential(
@@ -149,8 +129,8 @@ class FeedForward(jit.ScriptModule):
             nn.LayerNorm(320),
             nn.Linear(320, 256),
             ReSine(256),
-            nn.Linear(256, 192),
-            LinearIDropout(192, f_out, prob),
+            LinearIDropout(256, 192, 0.5),
+            LinearIDropout(192, f_out, 0.5)
         )
 
     @jit.script_method
@@ -165,26 +145,26 @@ class Actor(jit.ScriptModule):
 
         hidden_dim = 320
         
-        self.inA = LinearIDropout(state_dim, hidden_dim, prob=0.15)
-        self.inB = LinearIDropout(state_dim, hidden_dim, prob=0.15)
-        self.inC = LinearIDropout(state_dim, hidden_dim, prob=0.15)
+        self.inA = nn.Linear(state_dim, 320)
+        self.inB = nn.Linear(state_dim, 256)
+        self.inC = nn.Linear(state_dim, 192)
+
         
-        
-        self.net = nn.Sequential(
-            FeedForward(3*hidden_dim, 128, prob=0.75),
-            nn.Linear(128, action_dim),
+        self.ffw = nn.Sequential(
+            #InplaceDropout(p=0.5),
+            FeedForward(768+state_dim, action_dim),
             nn.Tanh()
         )
-
 
         self.max_action = torch.mean(max_action).item()
         self.scale = 0.1*self.max_action
         self.lim = 3.0*self.scale
+
     
     @jit.script_method
     def forward(self, state):
-        x = torch.cat([self.inA(state), self.inB(state), self.inC(state)], dim=-1)
-        return self.max_action*self.net(x)
+        x = torch.cat([self.inA(state), self.inB(state), self.inC(state), state], dim=-1)
+        return self.max_action*self.ffw(x)
     
     # Do not use any decorators with online random generators (Symphony updates seed each time)
     def soft(self, state):
@@ -192,7 +172,7 @@ class Actor(jit.ScriptModule):
         x += self.scale*torch.randn_like(x).clamp(-self.lim, self.lim)
         return x.clamp(-self.max_action, self.max_action)
 
- 
+
 
 # nn.Module -> JIT C++ graph
 class Critic(jit.ScriptModule):
@@ -200,12 +180,13 @@ class Critic(jit.ScriptModule):
         super(Critic, self).__init__()
 
 
-        qA = FeedForward(state_dim+action_dim, 128, prob=0.75)
-        qB = FeedForward(state_dim+action_dim, 128, prob=0.75)
-        qC = FeedForward(state_dim+action_dim, 128, prob=0.75)
+        qA = FeedForward(state_dim+action_dim, 128)
+        qB = FeedForward(state_dim+action_dim, 128)
+        qC = FeedForward(state_dim+action_dim, 128)
 
 
         self.nets = nn.ModuleList([qA, qB, qC])
+
 
     @jit.script_method
     def forward(self, state, action):
@@ -218,7 +199,7 @@ class Critic(jit.ScriptModule):
         xs = self.forward(state, action)
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
         xs = torch.sort(xs, dim=-1).values
-        return (0.73*xs[:,0]+0.21*xs[:,1]+0.06*xs[:,2]).unsqueeze(1)
+        return (0.785*xs[:,0]+0.175*xs[:,1]+0.04*xs[:,2]).unsqueeze(1)
     
 
 
@@ -235,13 +216,12 @@ class Symphony(object):
         self.critic_target = Critic(state_dim, action_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        self.critic_optimizer = optim.AdamW(self.critic.parameters(), lr=3e-4)
-        self.actor_optimizer = optim.AdamW(self.actor.parameters(), lr=3e-4)
+        self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=3.33e-4)
+        self.actor_optimizer = optim.RMSprop(self.actor.parameters(), lr=2.33e-4)
+
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
-        self.rehsef = ReHSEF()
-        self.rehaef = ReHAEF()
 
 
         self.max_action = max_action
@@ -250,9 +230,12 @@ class Symphony(object):
         self.device = device
         self.state_dim = state_dim
         self.action_dim = action_dim
-        self.q_next_old_policy = [0.0, 0.0, 0.0]
-        self.weights =  torch.FloatTensor([0.06, 0.21, 0.73])
+        
+        self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0]
+        self.weights =  torch.FloatTensor([math.exp(-2.0), math.exp(-1.5), math.exp(-1.0),math.exp(-0.5), math.exp(0)])
+        self.weights = self.weights/self.weights.sum()
         self.scaler = torch.cuda.amp.GradScaler()
+
         
 
 
@@ -265,23 +248,28 @@ class Symphony(object):
 
     def train(self, tr_per_step=5):
         for _ in range(tr_per_step): self.update()
+
+
         
 
     def q_next_prev(self, q_next_target):
         with torch.no_grad():
             # cut list of the last 5 elements [Qn-3, Qn-2, Qn-1]
-            self.q_next_old_policy = self.q_next_old_policy[-3:]
+            self.q_next_old_policy = self.q_next_old_policy[-5:]
             # multiply last 5 elements with exp weights and sum, creating exponential weighted average
-            ewa = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-3 + 0.2 Qn-2 + 0.71 Qn-1]
+            out = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-3 + 0.21 Qn-2 + 0.73 Qn-1]
+            #out = torch.FloatTensor(self.q_next_old_policy).mean()
             # append new q next target value to the list
             self.q_next_old_policy.append(q_next_target.mean().detach())
             # return exp weighted average
-            return ewa
+            return out
 
     def update(self):
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.actor_optimizer.zero_grad(set_to_none=True)
         self.critic_optimizer.zero_grad(set_to_none=True)
+        k = 2.0 * self.replay_buffer.ratio
+
 
         with torch.no_grad():
             for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
@@ -291,11 +279,12 @@ class Symphony(object):
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             next_action = self.actor.soft(next_state)
             q_next_target = self.critic_target.cmin(next_state, next_action)
-            actor_loss = -self.rehaef(q_next_target, 0.99*self.q_next_prev(q_next_target))
+            actor_loss = -self.rehae(q_next_target, self.q_next_prev(q_next_target), k)
 
-            q = reward + (1-done) * 0.99 * q_next_target.detach()
+            q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
             qs = self.critic(state, action)
-            critic_loss = self.rehsef(q, qs[0]) + self.rehsef(q, qs[1]) + self.rehsef(q, qs[2])
+            critic_loss = self.rehse(q, qs[0], k) + self.rehse(q, qs[1], k) + self.rehse(q, qs[2], k)
+            
 
         #Actor Update
         self.scaler.scale(actor_loss).backward()
@@ -314,11 +303,12 @@ class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity, batch_lim, fade_factor=7.0):
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = min(max(200, self.length//100), batch_lim) #in order for sample to describe population
+        self.batch_size = min(max(128, self.length//300), batch_lim) #in order for sample to describe population
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
         self.fade_factor = fade_factor
         self.batch_lim = batch_lim
+        self.ratio = 0.0
 
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.bfloat16, device=device)
@@ -342,7 +332,9 @@ class ReplayBuffer:
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length) if self.length>1 else np.array([0.0])
-            self.batch_size = min(max(200, self.length//100), self.batch_lim)
+            self.batch_size = min(max(128, self.length//300), self.batch_lim)
+            self.ratio = self.length/self.capacity
+
         
 
         self.states[idx,:] = torch.tensor(state, dtype=torch.bfloat16, device=self.device)
