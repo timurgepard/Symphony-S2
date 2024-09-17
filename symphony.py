@@ -216,8 +216,8 @@ class Symphony(object):
         self.critic_target = Critic(state_dim, action_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=3e-4)
-        self.actor_optimizer = optim.RMSprop(self.actor.parameters(), lr=3e-4)
+        self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=3.33e-4)
+        self.actor_optimizer = optim.RMSprop(self.actor.parameters(), lr=2.33e-4)
 
 
         self.rehse = ReHSE()
