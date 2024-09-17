@@ -47,7 +47,7 @@ class ReHSE(jit.ScriptModule):
     @jit.script_method
     def forward(self, y1, y2, k:float):
         ae = torch.abs(y1-y2) + 1e-6
-        ae = ae**0.5*torch.tanh(ae/2)
+        ae = ae**k*torch.tanh(k*ae)
         return ae.mean()
 
 
@@ -60,7 +60,7 @@ class ReHAE(jit.ScriptModule):
     @jit.script_method
     def forward(self, y1, y2, k:float):
         e = (y1-y2) + 1e-6
-        e = torch.abs(e)**0.5*torch.tanh(e/2)
+        e = torch.abs(e)**k*torch.tanh(k*e)
         return e.mean()
 
 
@@ -143,7 +143,6 @@ class Actor(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, max_action=1.0):
         super(Actor, self).__init__()
 
-        hidden_dim = 320
         
         self.inA = nn.Linear(state_dim, 320)
         self.inB = nn.Linear(state_dim, 256)
@@ -151,7 +150,6 @@ class Actor(jit.ScriptModule):
 
         
         self.ffw = nn.Sequential(
-            #InplaceDropout(p=0.5),
             FeedForward(768+state_dim, action_dim),
             nn.Tanh()
         )
@@ -268,7 +266,7 @@ class Symphony(object):
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.actor_optimizer.zero_grad(set_to_none=True)
         self.critic_optimizer.zero_grad(set_to_none=True)
-        k = 2.0 * self.replay_buffer.ratio
+        k = self.replay_buffer.ratio
 
 
         with torch.no_grad():
