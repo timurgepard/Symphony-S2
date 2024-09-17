@@ -47,7 +47,7 @@ class ReHSE(jit.ScriptModule):
     @jit.script_method
     def forward(self, y1, y2, k:float):
         ae = torch.abs(y1-y2) + 1e-6
-        ae = ae**k*torch.tanh(k*ae)
+        ae = ae**0.5*torch.tanh(ae/2)
         return ae.mean()
 
 
@@ -60,7 +60,7 @@ class ReHAE(jit.ScriptModule):
     @jit.script_method
     def forward(self, y1, y2, k:float):
         e = (y1-y2) + 1e-6
-        e = torch.abs(e)**k*torch.tanh(k*e)
+        e = torch.abs(e)**0.5*torch.tanh(e/2)
         return e.mean()
 
 
@@ -216,8 +216,8 @@ class Symphony(object):
         self.critic_target = Critic(state_dim, action_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=3.33e-4)
-        self.actor_optimizer = optim.RMSprop(self.actor.parameters(), lr=2.33e-4)
+        self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=3e-4)
+        self.actor_optimizer = optim.RMSprop(self.actor.parameters(), lr=3e-4)
 
 
         self.rehse = ReHSE()
