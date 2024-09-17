@@ -35,7 +35,7 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], F
 
 
 capacity = 384000
-batch_lim = 1536
+batch_lim = 768
 fade_factor = 10 # fading memory factor, flat region before gradual forgeting
 tau = 0.005
 
