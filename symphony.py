@@ -19,8 +19,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # random seeds
-#r1, r2, r3 = 3, 7, 5
-r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
+r1, r2, r3 = 5, 4, 6
+#r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
 #r1, r2, r3 = (r1+r1_), (r2+r2_), (r3+r3_)
 print(r1, ", ", r2, ", ", r3)
 torch.manual_seed(r1)
@@ -219,8 +219,8 @@ class Symphony(object):
         self.critic_target = Critic(state_dim, action_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=3e-4)
-        self.actor_optimizer = optim.RMSprop(self.actor.parameters(), lr=3e-4)
+        self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=3.33e-4)
+        self.actor_optimizer = optim.RMSprop(self.actor.parameters(), lr=2.33e-4)
 
 
         self.rehse = ReHSE()
