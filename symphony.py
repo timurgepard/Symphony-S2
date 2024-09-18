@@ -19,8 +19,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # random seeds
-#r1, r2, r3 = 7, 1, 0
-r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
+r1, r2, r3 = 8, 7, 10
+#r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
 #r1, r2, r3 = (r1+r1_), (r2+r2_), (r3+r3_)
 print(r1, ", ", r2, ", ", r3)
 torch.manual_seed(r1)
@@ -266,7 +266,7 @@ class Symphony(object):
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.actor_optimizer.zero_grad(set_to_none=True)
         self.critic_optimizer.zero_grad(set_to_none=True)
-        k = self.replay_buffer.ratio
+        k = math.tanh(3.0 * self.replay_buffer.ratio)
 
 
         with torch.no_grad():
