@@ -19,8 +19,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # random seeds
-#r1, r2, r3 = 8, 7, 10
-r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
+r1, r2, r3 = 3, 7, 5
+#r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
 #r1, r2, r3 = (r1+r1_), (r2+r2_), (r3+r3_)
 print(r1, ", ", r2, ", ", r3)
 torch.manual_seed(r1)
@@ -83,6 +83,9 @@ class InplaceDropout(jit.ScriptModule):
         mask = (torch.rand_like(x) > self.p).float()
         return  mask * x + (1.0-mask) * x.detach()
 
+
+
+
 #Linear followed by Inplace Dropout
 # nn.Module -> JIT C++ graph
 class LinearIDropout(jit.ScriptModule):
@@ -138,6 +141,7 @@ class FeedForward(jit.ScriptModule):
         return self.ffw(x)
 
 
+
 # nn.Module -> JIT C++ graph
 class Actor(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, max_action=1.0):
@@ -172,6 +176,7 @@ class Actor(jit.ScriptModule):
 
 
 
+
 # nn.Module -> JIT C++ graph
 class Critic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim):
@@ -198,7 +203,7 @@ class Critic(jit.ScriptModule):
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
         xs = torch.sort(xs, dim=-1).values
         return (0.785*xs[:,0]+0.175*xs[:,1]+0.04*xs[:,2]).unsqueeze(1)
-    
+
 
 
 
