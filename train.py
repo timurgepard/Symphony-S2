@@ -34,7 +34,7 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], False
 
 
-capacity = 320000
+capacity = 1000000
 batch_lim = 768
 fade_factor = 10 # fading memory factor, flat region before gradual forgeting
 tau = 0.005
@@ -325,7 +325,8 @@ for i in range(start_episode, num_episodes):
         random.seed(r3)
 
         if (total_steps>=1250 and total_steps%1250==0):
-            part = "_"+str(total_steps/1000) if total_steps%50000==0 else ""
+            #part = "_"+str(total_steps/1000) if total_steps%50000==0 else ""
+            part = ""
             testing(env_test, limit_step=limit_eval, test_episodes=100, current_step=total_steps, save_log=True)
             torch.save(algo.actor.state_dict(), 'actor_model'+ part +'.pt')
             torch.save(algo.critic.state_dict(), 'critic_model'+ part +'.pt')
