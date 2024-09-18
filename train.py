@@ -34,7 +34,7 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], False
 
 
-capacity = 768000
+capacity = 1000000
 batch_lim = 768
 fade_factor = 10 # fading memory factor, flat region before gradual forgeting
 tau = 0.005
