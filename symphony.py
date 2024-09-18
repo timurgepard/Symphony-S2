@@ -19,8 +19,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # random seeds
-r1, r2, r3 = 8, 7, 10
-#r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
+#r1, r2, r3 = 8, 7, 10
+r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
 #r1, r2, r3 = (r1+r1_), (r2+r2_), (r3+r3_)
 print(r1, ", ", r2, ", ", r3)
 torch.manual_seed(r1)
