@@ -244,9 +244,6 @@ if not Q_learning:
     log_file.write("experiment_started\n")
     total_steps = 0
 
-    algo.actor.apply(init_weights)
-    algo.critic.apply(init_weights)
-
 
     while not Q_learning:
         rewards = []
@@ -261,11 +258,6 @@ if not Q_learning:
             np.random.seed(r2)
             random.seed(r3)
 
-            #------------------learning will not depend on initial weights------------------------
-            algo.actor.apply(add_weights)
-            algo.critic.apply(add_weights)
-          
-
             if total_steps>=explore_time and not Q_learning: Q_learning = True
             action = max_action.numpy()*np.random.uniform(-0.5, 1.0, size=action_dim)
             next_state, reward, done, truncated, info = env.step(action)
@@ -278,10 +270,6 @@ if not Q_learning:
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
 
-
-    algo.actor.apply(scale_weights)
-    algo.critic.apply(scale_weights)
-    algo.critic_target.load_state_dict(algo.critic.state_dict())
 
     total_steps = 0
     print("copying explore data")
