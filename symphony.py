@@ -116,7 +116,7 @@ class ReSine(jit.ScriptModule):
     def forward(self, x):
         k = torch.sigmoid(0.1*self.s)
         x = k*torch.sin(x/k)
-        return F.prelu(x, 0.1*k)
+        return F.prelu(x, 0.15*k)
 
 
 
@@ -271,7 +271,7 @@ class Symphony(object):
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.actor_optimizer.zero_grad(set_to_none=True)
         self.critic_optimizer.zero_grad(set_to_none=True)
-        k = math.tanh(3.0 * self.replay_buffer.ratio)
+        k = self.replay_buffer.ratio
 
 
         with torch.no_grad():
