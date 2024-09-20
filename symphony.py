@@ -19,7 +19,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # random seeds
-#r1, r2, r3 = 5, 4, 6
+#r1, r2, r3 = 4, 1, 10
 r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
 #r1, r2, r3 = (r1+r1_), (r2+r2_), (r3+r3_)
 print(r1, ", ", r2, ", ", r3)
@@ -282,7 +282,7 @@ class Symphony(object):
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             next_action = self.actor.soft(next_state)
             q_next_target = self.critic_target.cmin(next_state, next_action)
-            actor_loss = -self.rehae(q_next_target, self.q_next_prev(q_next_target), k)
+            actor_loss = -self.rehae(q_next_target,  self.q_next_prev(q_next_target), k)
 
             q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
             qs = self.critic(state, action)
