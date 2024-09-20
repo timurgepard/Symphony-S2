@@ -111,14 +111,6 @@ max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bou
 algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity, batch_lim, fade_factor)
 
 
-def init_weights(m):
-    if isinstance(m, nn.Linear): m.weight = torch.nn.init.xavier_uniform_(m.weight)
-
-def add_weights(m):
-    if isinstance(m, nn.Linear): m.weight += torch.nn.init.xavier_uniform_(m.weight)
-
-def scale_weights(m):
-    if isinstance(m, nn.Linear): m.weight = m.weight/explore_time
 
 
 #==============================================================================================
@@ -244,9 +236,6 @@ if not Q_learning:
     log_file.write("experiment_started\n")
     total_steps = 0
 
-    algo.actor.apply(init_weights)
-    algo.critic.apply(init_weights)
-
 
     while not Q_learning:
         rewards = []
@@ -261,9 +250,7 @@ if not Q_learning:
             np.random.seed(r2)
             random.seed(r3)
 
-            #------------------learning will not depend on initial weights------------------------
-            algo.actor.apply(add_weights)
-            algo.critic.apply(add_weights)
+
           
 
             if total_steps>=explore_time and not Q_learning: Q_learning = True
@@ -279,9 +266,6 @@ if not Q_learning:
         print(f" Rtrn = {Return:.2f}")
 
 
-    algo.actor.apply(scale_weights)
-    algo.critic.apply(scale_weights)
-    algo.critic_target.load_state_dict(algo.critic.state_dict())
 
     total_steps = 0
     print("copying explore data")
