@@ -27,14 +27,14 @@ option = 3
 
 explore_time = 5000
 tr_per_step = 5 # actor-critic updates per frame/step
-limit_step = 1000 #max steps per episode
+limit_step = 768 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
 start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], False
 
 
-capacity = 768*1000
+capacity = 768000
 batch_lim = 768
 fade_factor = 10 # fading memory factor, flat region before gradual forgeting
 tau = 0.005
@@ -110,6 +110,9 @@ max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bou
 
 algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity, batch_lim, fade_factor)
 
+
+def init_weights(m):
+    if isinstance(m, nn.Linear): m.weight = torch.nn.init.xavier_uniform_(m.weight)
 
 
 
@@ -236,6 +239,10 @@ if not Q_learning:
     log_file.write("experiment_started\n")
     total_steps = 0
 
+    algo.actor.apply(init_weights)
+    algo.critic.apply(init_weights)
+    algo.critic_target.load_state_dict(algo.critic.state_dict())
+
 
     while not Q_learning:
         rewards = []
@@ -249,9 +256,7 @@ if not Q_learning:
             torch.manual_seed(r1)
             np.random.seed(r2)
             random.seed(r3)
-
-
-          
+         
 
             if total_steps>=explore_time and not Q_learning: Q_learning = True
             action = max_action.numpy()*np.random.uniform(-0.5, 1.0, size=action_dim)
@@ -265,7 +270,7 @@ if not Q_learning:
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
 
-
+    
 
     total_steps = 0
     print("copying explore data")
