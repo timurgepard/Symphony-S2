@@ -7,6 +7,7 @@ import math
 import random
 import torch.nn.functional as F
 import torch.jit as jit
+import os, re
 
 #==============================================================================================
 #==============================================================================================
@@ -17,22 +18,41 @@ import torch.jit as jit
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# to continue writing to the same history file and derive its name. This function created with the help of ChatGPT
+def extract_r1_r2_r3():
+    pattern = r'history_(\d+)_(\d+)_(\d+)\.log'
 
-# random seeds
-#r1, r2, r3 = 4, 1, 10
-r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
-#r1, r2, r3 = (r1+r1_), (r2+r2_), (r3+r3_)
-print(r1, ", ", r2, ", ", r3)
-torch.manual_seed(r1)
-np.random.seed(r2)
-random.seed(r3)
+    # Iterate through the files in the given directory
+    for filename in os.listdir():
+        # Match the filename with the pattern
+        match = re.match(pattern, filename)
+        if match:
+            # Extract the numbers r1, r2, and r3 from the filename
+            return map(int, match.groups())
+    return None
 
+
+#write or append to the history log file
 class LogFile(object):
     def __init__(self, log_name):
         self.log_name= log_name
     def write(self, text):
         with open(self.log_name, 'a+') as file:
             file.write(text)
+
+
+numbers = extract_r1_r2_r3()
+if numbers != None:
+    # derive random numbers from history file
+    r1, r2, r3 = numbers
+else:
+    # generate new random seeds
+    r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
+    torch.manual_seed(r1)
+    np.random.seed(r2)
+    random.seed(r3)
+
+print(r1, ", ", r2, ", ", r3)
 
 log_name = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
 log_file = LogFile(log_name)
