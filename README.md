@@ -23,6 +23,7 @@ Some ideas were dropped and some proven their worth were solidified:
 Some modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule.
 
 Architecture:
-![image](https://github.com/timurgepard/Symphony-Classic/assets/13238473/459a9e9b-250f-467c-ad04-4d7e76d0f8c7)
+![image](https://github.com/user-attachments/assets/65f6830c-687f-427f-8734-157b76018927)
+
 
 
