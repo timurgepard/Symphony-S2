@@ -56,7 +56,6 @@ print(r1, ", ", r2, ", ", r3)
 log_name = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
 log_file = LogFile(log_name)
 
-
 #Rectified Huber Symmetric Error Loss Function via JIT Module
 # nn.Module -> JIT C++ graph
 class ReHSE(jit.ScriptModule):
@@ -88,11 +87,11 @@ class ReHAE(jit.ScriptModule):
 
 
 
-#Inplace Dropout function created with the help of ChatGPT
+#Silent Dropout function created with the help of ChatGPT
 # nn.Module -> JIT C++ graph
-class InplaceDropout(jit.ScriptModule):
+class SilentDropout(jit.ScriptModule):
     def __init__(self, p=0.5):
-        super(InplaceDropout, self).__init__()
+        super(SilentDropout, self).__init__()
         self.p = p
 
     # It is not recommended to use JIT compilation decorator with online random generator as Symphony updates seeds each time
@@ -105,11 +104,11 @@ class InplaceDropout(jit.ScriptModule):
 
 
 
-#Linear followed by Inplace Dropout
+#Linear followed by Silent Dropout
 # nn.Module -> JIT C++ graph
-class LinearIDropout(jit.ScriptModule):
+class LinearSDropout(jit.ScriptModule):
     def __init__(self, f_in, f_out, p=0.5):
-        super(LinearIDropout, self).__init__()
+        super(LinearSDropout, self).__init__()
         self.ffw = nn.Linear(f_in, f_out)
         self.p = p
 
@@ -151,8 +150,8 @@ class FeedForward(jit.ScriptModule):
             nn.LayerNorm(320),
             nn.Linear(320, 256),
             ReSine(256),
-            LinearIDropout(256, 192, 0.5),
-            LinearIDropout(192, f_out, 0.5)
+            LinearSDropout(256, 192, 0.5),
+            LinearSDropout(192, f_out, 0.5)
         )
 
     @jit.script_method
@@ -222,6 +221,7 @@ class Critic(jit.ScriptModule):
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
         xs = torch.sort(xs, dim=-1).values
         return (0.785*xs[:,0]+0.175*xs[:,1]+0.04*xs[:,2]).unsqueeze(1)
+
 
 
 
