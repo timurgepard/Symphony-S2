@@ -55,6 +55,9 @@ print(r1, ", ", r2, ", ", r3)
 
 log_name = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
 log_file = LogFile(log_name)
+
+
+
 #Rectified Huber Symmetric Error Loss Function via JIT Module
 # nn.Module -> JIT C++ graph
 class ReHSE(jit.ScriptModule):
@@ -86,7 +89,7 @@ class ReHAE(jit.ScriptModule):
 
 
 
-#Inplace Dropout function created with the help of ChatGPT
+#Silent Dropout function created with the help of ChatGPT
 # nn.Module -> JIT C++ graph
 class SilentDropout(jit.ScriptModule):
     def __init__(self, p=0.5):
@@ -103,7 +106,7 @@ class SilentDropout(jit.ScriptModule):
 
 
 
-#Linear followed by Inplace Dropout
+#Linear followed by Silent Dropout
 # nn.Module -> JIT C++ graph
 class LinearSDropout(jit.ScriptModule):
     def __init__(self, f_in, f_out, p=0.5):
