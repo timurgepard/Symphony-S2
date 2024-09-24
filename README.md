@@ -23,7 +23,8 @@ Some ideas were dropped and some proven their worth were solidified:
 Some modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule.
 
 Architecture:
-![image](https://github.com/user-attachments/assets/a51cc9db-d370-4151-b665-29d97221195c)
+![image](https://github.com/user-attachments/assets/126f5c4f-c9cd-4cd6-9292-9fcd3a6cc18a)
+
 
 
 
