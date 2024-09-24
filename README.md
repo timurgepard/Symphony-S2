@@ -14,7 +14,7 @@ Some ideas were dropped and some proven their worth were solidified:
 3. Rectified Learnable Sine Wave Activation Function ✅
 4. Rectified Huber Symmetric and Asymmetric Loss Functions ✅
 5. Seamless Actor-Critic updates ✅
-6. Inplace Dropouts ✅
+6. Silent Dropouts ✅
 
 1. <del>"movement is life" concept</del> ❌
 2. <del>reduced objective to learn Bellman's sum of dumped reward's variance</del> ❌
