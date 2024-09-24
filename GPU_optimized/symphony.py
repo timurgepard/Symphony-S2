@@ -17,7 +17,6 @@ import os, re
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 # to continue writing to the same history file and derive its name. This function created with the help of ChatGPT
 def extract_r1_r2_r3():
     pattern = r'history_(\d+)_(\d+)_(\d+)\.log'
@@ -89,11 +88,11 @@ class ReHAE(jit.ScriptModule):
 
 
 
-#Inplace Dropout function created with the help of ChatGPT
+#Silent Dropout function created with the help of ChatGPT
 # nn.Module -> JIT C++ graph
-class InplaceDropout(jit.ScriptModule):
+class SilentDropout(jit.ScriptModule):
     def __init__(self, p=0.5):
-        super(InplaceDropout, self).__init__()
+        super(SilentDropout, self).__init__()
         self.p = p
 
     # It is not recommended to use JIT compilation decorator with online random generator as Symphony updates seeds each time
@@ -106,11 +105,11 @@ class InplaceDropout(jit.ScriptModule):
 
 
 
-#Linear followed by Inplace Dropout
+#Linear followed by Silent Dropout
 # nn.Module -> JIT C++ graph
-class LinearIDropout(jit.ScriptModule):
+class LinearSDropout(jit.ScriptModule):
     def __init__(self, f_in, f_out, p=0.5):
-        super(LinearIDropout, self).__init__()
+        super(LinearSDropout, self).__init__()
         self.ffw = nn.Linear(f_in, f_out)
         self.p = p
 
@@ -152,8 +151,8 @@ class FeedForward(jit.ScriptModule):
             nn.LayerNorm(320),
             nn.Linear(320, 256),
             ReSine(256),
-            LinearIDropout(256, 192, 0.5),
-            LinearIDropout(192, f_out, 0.5)
+            LinearSDropout(256, 192, 0.5),
+            LinearSDropout(192, f_out, 0.5)
         )
 
     @jit.script_method
@@ -174,6 +173,7 @@ class Actor(jit.ScriptModule):
 
         
         self.ffw = nn.Sequential(
+            SilentDropout(p=0.5),
             FeedForward(768+state_dim, action_dim),
             nn.Tanh()
         )
@@ -257,7 +257,7 @@ class Symphony(object):
         self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0]
         self.weights =  torch.FloatTensor([math.exp(-2.0), math.exp(-1.5), math.exp(-1.0),math.exp(-0.5), math.exp(0)])
         self.weights = self.weights/self.weights.sum()
-        self.scaler = torch.cuda.amp.GradScaler()
+        #self.scaler = torch.cuda.amp.GradScaler()
 
         
 
@@ -299,25 +299,21 @@ class Symphony(object):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param)
 
         
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            next_action = self.actor.soft(next_state)
-            q_next_target = self.critic_target.cmin(next_state, next_action)
-            actor_loss = -self.rehae(q_next_target,  self.q_next_prev(q_next_target), k)
+        next_action = self.actor.soft(next_state)
+        q_next_target = self.critic_target.cmin(next_state, next_action)
+        actor_loss = -self.rehae(q_next_target,  self.q_next_prev(q_next_target), k)
 
-            q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
-            qs = self.critic(state, action)
-            critic_loss = self.rehse(q, qs[0], k) + self.rehse(q, qs[1], k) + self.rehse(q, qs[2], k)
+        q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
+        qs = self.critic(state, action)
+        critic_loss = self.rehse(q, qs[0], k) + self.rehse(q, qs[1], k) + self.rehse(q, qs[2], k)
             
+        actor_loss.backward()
+        self.actor_optimizer.step()
 
-        #Actor Update
-        self.scaler.scale(actor_loss).backward()
-        self.scaler.step(self.actor_optimizer)
+        critic_loss.backward()
+        self.critic_optimizer.step()
 
-        #Critic Update
-        self.scaler.scale(critic_loss).backward()
-        self.scaler.step(self.critic_optimizer)
-        
-        self.scaler.update()
+
 
 
 
@@ -334,11 +330,11 @@ class ReplayBuffer:
         self.ratio = 0.0
 
 
-        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.bfloat16, device=device)
-        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.bfloat16, device=device)
-        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.bfloat16, device=device)
-        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.bfloat16, device=device)
-        self.dones = torch.zeros((self.capacity, 1), dtype=torch.bfloat16, device=device)
+        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
+        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
+        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
+        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
+        self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
 
 
     #Normalized index conversion into fading probabilities
@@ -360,11 +356,11 @@ class ReplayBuffer:
 
         
 
-        self.states[idx,:] = torch.tensor(state, dtype=torch.bfloat16, device=self.device)
-        self.actions[idx,:] = torch.tensor(action, dtype=torch.bfloat16, device=self.device)
-        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.bfloat16, device=self.device)
-        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.bfloat16, device=self.device)
-        self.dones[idx,:] = torch.tensor([done], dtype=torch.bfloat16, device=self.device)
+        self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
+        self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
+        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
+        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
+        self.dones[idx,:] = torch.tensor([done], dtype=torch.float32, device=self.device)
 
 
         if self.length==self.capacity:
