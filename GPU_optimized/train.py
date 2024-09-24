@@ -24,7 +24,6 @@ print(device)
 # environment type.
 option = 3
 
-
 explore_time = 5000
 tr_per_step = 5 # actor-critic updates per frame/step
 limit_step = 768 #max steps per episode
