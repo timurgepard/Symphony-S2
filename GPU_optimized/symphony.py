@@ -173,6 +173,7 @@ class Actor(jit.ScriptModule):
 
         
         self.ffw = nn.Sequential(
+            SilentDropout(p=0.15),
             FeedForward(768+state_dim, action_dim),
             nn.Tanh()
         )
