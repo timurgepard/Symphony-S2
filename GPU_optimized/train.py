@@ -24,9 +24,10 @@ print(device)
 # environment type.
 option = 3
 
+
 explore_time = 5000
 tr_per_step = 5 # actor-critic updates per frame/step
-limit_step = 768 #max steps per episode
+limit_step = 2000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
 start_episode = 1 #number for the identification of the current episode
