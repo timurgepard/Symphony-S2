@@ -201,7 +201,7 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        #hard_recovery(algo, dict['buffer'], 100000) # comment the previous line and chose a memory size to recover from old buffer
+        #hard_recovery(algo, dict['buffer'], 133750+20000) # comment the previous line and chose a memory size to recover from old buffer
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
         total_steps = dict['total_steps']
