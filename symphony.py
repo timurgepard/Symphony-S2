@@ -134,9 +134,9 @@ class ReSine(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x):
-        k = torch.sigmoid(0.1*self.s)
-        x = k*torch.sin(x/k)
-        return F.prelu(x, 0.15*k)
+        #k = torch.sigmoid(0.1*self.s)
+        x = torch.sin(x)
+        return F.leaky_relu(x, 0.1)
 
 
 
@@ -222,8 +222,9 @@ class Critic(jit.ScriptModule):
     def cmin(self, state, action):
         xs = self.forward(state, action)
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
-        xs = torch.sort(xs, dim=-1).values
-        return (0.785*xs[:,0]+0.175*xs[:,1]+0.04*xs[:,2]).unsqueeze(1)
+        return torch.min(xs, dim=-1, keepdim=True).values
+        #xs = torch.sort(xs, dim=-1).values
+        #return (0.785*xs[:,0]+0.175*xs[:,1]+0.04*xs[:,2]).unsqueeze(1)
 
 
 
