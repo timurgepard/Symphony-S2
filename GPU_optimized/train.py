@@ -27,7 +27,7 @@ option = 3
 
 explore_time = 5000
 tr_per_step = 5 # actor-critic updates per frame/step
-limit_step = 2000 #max steps per episode
+limit_step = 1280 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
 start_episode = 1 #number for the identification of the current episode
@@ -35,7 +35,7 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], F
 
 
 capacity = 384000
-batch_lim = 768
+batch_lim = 1280
 fade_factor = 10 # fading memory factor, flat region before gradual forgeting
 tau = 0.005
 
@@ -201,7 +201,7 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        #hard_recovery(algo, dict['buffer'], 100000) # comment the previous line and chose a memory size to recover from old buffer
+        #hard_recovery(algo, dict['buffer'], 136250+20000) # comment the previous line and chose a memory size to recover from old buffer
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
         total_steps = dict['total_steps']
