@@ -9,12 +9,12 @@ import torch.nn.functional as F
 import torch.jit as jit
 import os, re
 
-#==============================================================================================
-#==============================================================================================
-#=========================================SYMPHONY=============================================
-#==============================================================================================
-#==============================================================================================
 
+#==============================================================================================
+#==============================================================================================
+#=========================================LOGGING=============================================
+#==============================================================================================
+#==============================================================================================
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # to continue writing to the same history file and derive its name. This function created with the help of ChatGPT
@@ -33,12 +33,15 @@ def extract_r1_r2_r3():
 
 #write or append to the history log file
 class LogFile(object):
-    def __init__(self, log_name):
-        self.log_name= log_name
+    def __init__(self, log_name_main, log_name_opt):
+        self.log_name_main = log_name_main
+        self.log_name_opt = log_name_opt
     def write(self, text):
-        with open(self.log_name, 'a+') as file:
+        with open(self.log_name_main, 'a+') as file:
             file.write(text)
-
+    def write_opt(self, text):
+        with open(self.log_name_opt, 'a+') as file:
+            file.write(text)
 
 numbers = extract_r1_r2_r3()
 if numbers != None:
@@ -47,14 +50,25 @@ if numbers != None:
 else:
     # generate new random seeds
     r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
-    torch.manual_seed(r1)
-    np.random.seed(r2)
-    random.seed(r3)
+
+torch.manual_seed(r1)
+np.random.seed(r2)
+random.seed(r3)
 
 print(r1, ", ", r2, ", ", r3)
 
-log_name = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
-log_file = LogFile(log_name)
+log_name_main = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
+log_name_opt = "episodes_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
+log_file = LogFile(log_name_main, log_name_opt)
+
+
+
+
+#==============================================================================================
+#==============================================================================================
+#=========================================SYMPHONY=============================================
+#==============================================================================================
+#==============================================================================================
 
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
@@ -134,8 +148,7 @@ class ReSine(jit.ScriptModule):
     @jit.script_method
     def forward(self, x):
         #k = torch.sigmoid(0.1*self.s)
-        x = torch.sin(x)
-        return F.leaky_relu(x, 0.1)
+        return F.leaky_relu(torch.sin(x), 0.1)
 
 
 
@@ -211,6 +224,8 @@ class Critic(jit.ScriptModule):
         self.nets = nn.ModuleList([qA, qB, qC])
 
 
+
+
     @jit.script_method
     def forward(self, state, action):
         x = torch.cat([state, action], -1)
@@ -223,7 +238,7 @@ class Critic(jit.ScriptModule):
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
         return torch.min(xs, dim=-1, keepdim=True).values
         #xs = torch.sort(xs, dim=-1).values
-        #return (0.785*xs[:,0]+0.175*xs[:,1]+0.04*xs[:,2]).unsqueeze(1)
+        #return (0.950*xs[:,0]+0.047*xs[:,1]+0.002*xs[:,2]).unsqueeze(1)
 
 
 
@@ -258,7 +273,7 @@ class Symphony(object):
         self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0]
         self.weights =  torch.FloatTensor([math.exp(-2.0), math.exp(-1.5), math.exp(-1.0),math.exp(-0.5), math.exp(0)])
         self.weights = self.weights/self.weights.sum()
-        #self.scaler = torch.cuda.amp.GradScaler()
+        self.scaler = torch.cuda.amp.GradScaler()
 
         
 
@@ -300,20 +315,24 @@ class Symphony(object):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param)
 
         
-        next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.cmin(next_state, next_action)
-        actor_loss = -self.rehae(q_next_target,  self.q_next_prev(q_next_target), k)
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            next_action = self.actor.soft(next_state)
+            q_next_target = self.critic_target.cmin(next_state, next_action)
+            actor_loss = -self.rehae(q_next_target, self.q_next_prev(q_next_target), k)
 
-        q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
-        qs = self.critic(state, action)
-        critic_loss = self.rehse(q, qs[0], k) + self.rehse(q, qs[1], k) + self.rehse(q, qs[2], k)
-            
-        actor_loss.backward()
-        self.actor_optimizer.step()
+            q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
+            qs = self.critic(state, action)
+            critic_loss = self.rehse(q, qs[0], k) + self.rehse(q, qs[1], k) + self.rehse(q, qs[2], k)
 
-        critic_loss.backward()
-        self.critic_optimizer.step()
+        #Actor Update
+        self.scaler.scale(actor_loss).backward()
+        self.scaler.step(self.actor_optimizer)
 
+        #Critic Update
+        self.scaler.scale(critic_loss).backward()
+        self.scaler.step(self.critic_optimizer)
+        
+        self.scaler.update()
 
 
 
@@ -330,12 +349,11 @@ class ReplayBuffer:
         self.batch_lim = batch_lim
         self.ratio = 0.0
 
-
-        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
-        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
-        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
-        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
-        self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
+        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.bfloat16, device=device)
+        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.bfloat16, device=device)
+        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.bfloat16, device=device)
+        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.bfloat16, device=device)
+        self.dones = torch.zeros((self.capacity, 1), dtype=torch.bfloat16, device=device)
 
 
     #Normalized index conversion into fading probabilities
@@ -356,12 +374,11 @@ class ReplayBuffer:
             self.ratio = self.length/self.capacity
 
         
-
-        self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
-        self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
-        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
-        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
-        self.dones[idx,:] = torch.tensor([done], dtype=torch.float32, device=self.device)
+        self.states[idx,:] = torch.tensor(state, dtype=torch.bfloat16, device=self.device)
+        self.actions[idx,:] = torch.tensor(action, dtype=torch.bfloat16, device=self.device)
+        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.bfloat16, device=self.device)
+        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.bfloat16, device=self.device)
+        self.dones[idx,:] = torch.tensor([done], dtype=torch.bfloat16, device=self.device)
 
 
         if self.length==self.capacity:
