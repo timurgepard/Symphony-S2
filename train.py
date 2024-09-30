@@ -132,6 +132,16 @@ def hard_recovery(algo, replay_buffer, size):
     algo.replay_buffer.length = len(replay_buffer.indices)
     algo.replay_buffer.batch_size = replay_buffer.batch_size
 
+def hard_recovery_to_bfloat16(algo, replay_buffer, size):
+    algo.replay_buffer.states[:size] = torch.tensor(replay_buffer.states[:size], dtype=torch.bfloat16, device=device)
+    algo.replay_buffer.actions[:size] = torch.tensor(replay_buffer.actions[:size], dtype=torch.bfloat16, device=device)
+    algo.replay_buffer.rewards[:size] = torch.tensor(replay_buffer.rewards[:size], dtype=torch.bfloat16, device=device)
+    algo.replay_buffer.next_states[:size] = torch.tensor(replay_buffer.next_states[:size], dtype=torch.bfloat16, device=device)
+    algo.replay_buffer.dones[:size] = torch.tensor(replay_buffer.dones[:size], dtype=torch.bfloat16, device=device)
+    algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
+    algo.replay_buffer.length = len(replay_buffer.indices)
+    algo.replay_buffer.batch_size = replay_buffer.batch_size
+
 
 def explore_copy(rb, e_time, times):
     for i in range(times):
@@ -201,7 +211,8 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        #hard_recovery(algo, dict['buffer'], 136250+20000) # comment the previous line and chose a memory size to recover from old buffer
+        #hard_recovery(algo, dict['buffer'], 111250+20000) # comment the previous line and chose a memory size to recover from old buffer
+        #hard_recovery_to_bfloat16(algo, dict['buffer'], 158750+20000) # comment the previous line and chose a memory size to recover from old buffer
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
         total_steps = dict['total_steps']
@@ -274,7 +285,7 @@ if not Q_learning:
 
     total_steps = 0
     print("copying explore data")
-    explore_copy(algo.replay_buffer, explore_time, 3)
+    explore_copy(algo.replay_buffer, explore_time, 4)
     
     
 
@@ -344,6 +355,8 @@ for i in range(start_episode, num_episodes):
 
 
     print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {episode_steps} | total_steps = {total_steps}")
+
+    log_file.write_opt(str(i) + ": " + str(round(episode_rewards_all[-1], 2)) + "\n")
 
 
  
