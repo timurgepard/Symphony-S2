@@ -212,7 +212,7 @@ try:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
         #hard_recovery(algo, dict['buffer'], 111250+20000) # comment the previous line and chose a memory size to recover from old buffer
-        #hard_recovery_to_bfloat16(algo, dict['buffer'], 111250+20000) # comment the previous line and chose a memory size to recover from old buffer
+        #hard_recovery_to_bfloat16(algo, dict['buffer'], 158750+20000) # comment the previous line and chose a memory size to recover from old buffer
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
         total_steps = dict['total_steps']
@@ -285,7 +285,7 @@ if not Q_learning:
 
     total_steps = 0
     print("copying explore data")
-    explore_copy(algo.replay_buffer, explore_time, 3)
+    explore_copy(algo.replay_buffer, explore_time, 4)
     
     
 
