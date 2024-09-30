@@ -11,10 +11,9 @@ import os, re
 
 #==============================================================================================
 #==============================================================================================
-#=========================================SYMPHONY=============================================
+#=========================================LOGGING=============================================
 #==============================================================================================
 #==============================================================================================
-
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # to continue writing to the same history file and derive its name. This function created with the help of ChatGPT
@@ -33,12 +32,15 @@ def extract_r1_r2_r3():
 
 #write or append to the history log file
 class LogFile(object):
-    def __init__(self, log_name):
-        self.log_name= log_name
+    def __init__(self, log_name_main, log_name_opt):
+        self.log_name_main = log_name_main
+        self.log_name_opt = log_name_opt
     def write(self, text):
-        with open(self.log_name, 'a+') as file:
+        with open(self.log_name_main, 'a+') as file:
             file.write(text)
-
+    def write_opt(self, text):
+        with open(self.log_name_opt, 'a+') as file:
+            file.write(text)
 
 numbers = extract_r1_r2_r3()
 if numbers != None:
@@ -47,14 +49,26 @@ if numbers != None:
 else:
     # generate new random seeds
     r1, r2, r3 = random.randint(0,10), random.randint(0,10), random.randint(0,10)
-    torch.manual_seed(r1)
-    np.random.seed(r2)
-    random.seed(r3)
+
+torch.manual_seed(r1)
+np.random.seed(r2)
+random.seed(r3)
 
 print(r1, ", ", r2, ", ", r3)
 
-log_name = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
-log_file = LogFile(log_name)
+log_name_main = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
+log_name_opt = "episodes_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
+log_file = LogFile(log_name_main, log_name_opt)
+
+
+
+
+#==============================================================================================
+#==============================================================================================
+#=========================================SYMPHONY=============================================
+#==============================================================================================
+#==============================================================================================
+
 
 
 
