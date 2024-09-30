@@ -140,15 +140,11 @@ class LinearSDropout(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        stdev = math.sqrt(1/hidden_dim)
-        noise = torch.normal(mean=torch.zeros(hidden_dim), std=stdev).clamp(-3.0*stdev, 3.0*stdev)
-        self.s = nn.Parameter(data=noise, requires_grad=True)
-
 
     @jit.script_method
     def forward(self, x):
-        #k = torch.sigmoid(0.1*self.s)
-        return F.leaky_relu(torch.sin(x), 0.1)
+        x = 0.75*torch.sin(x/0.75)
+        return F.leaky_relu(x, 0.1)
 
 
 
@@ -224,8 +220,6 @@ class Critic(jit.ScriptModule):
         self.nets = nn.ModuleList([qA, qB, qC])
 
 
-
-
     @jit.script_method
     def forward(self, state, action):
         x = torch.cat([state, action], -1)
@@ -237,9 +231,6 @@ class Critic(jit.ScriptModule):
         xs = self.forward(state, action)
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
         return torch.min(xs, dim=-1, keepdim=True).values
-        #xs = torch.sort(xs, dim=-1).values
-        #return (0.950*xs[:,0]+0.047*xs[:,1]+0.002*xs[:,2]).unsqueeze(1)
-
 
 
 
@@ -296,8 +287,7 @@ class Symphony(object):
             # cut list of the last 5 elements [Qn-3, Qn-2, Qn-1]
             self.q_next_old_policy = self.q_next_old_policy[-5:]
             # multiply last 5 elements with exp weights and sum, creating exponential weighted average
-            out = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-3 + 0.21 Qn-2 + 0.73 Qn-1]
-            #out = torch.FloatTensor(self.q_next_old_policy).mean()
+            out = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-5 + 0.1 Qn-4 + 0.16 Qn-3 + 0.21 Qn-2 + 0.43 Qn-1]
             # append new q next target value to the list
             self.q_next_old_policy.append(q_next_target.mean().detach())
             # return exp weighted average
