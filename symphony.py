@@ -127,15 +127,10 @@ class LinearSDropout(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        stdev = math.sqrt(1/hidden_dim)
-        noise = torch.normal(mean=torch.zeros(hidden_dim), std=stdev).clamp(-3.0*stdev, 3.0*stdev)
-        self.s = nn.Parameter(data=noise, requires_grad=True)
-
 
     @jit.script_method
     def forward(self, x):
-        #k = torch.sigmoid(0.1*self.s)
-        x = torch.sin(x)
+        x = 0.75*torch.sin(x/0.75)
         return F.leaky_relu(x, 0.1)
 
 
@@ -223,8 +218,6 @@ class Critic(jit.ScriptModule):
         xs = self.forward(state, action)
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
         return torch.min(xs, dim=-1, keepdim=True).values
-        #xs = torch.sort(xs, dim=-1).values
-        #return (0.785*xs[:,0]+0.175*xs[:,1]+0.04*xs[:,2]).unsqueeze(1)
 
 
 
