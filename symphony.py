@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torch.jit as jit
 import os, re
 
+
 #==============================================================================================
 #==============================================================================================
 #=========================================LOGGING=============================================
@@ -68,8 +69,6 @@ log_file = LogFile(log_name_main, log_name_opt)
 #=========================================SYMPHONY=============================================
 #==============================================================================================
 #==============================================================================================
-
-
 
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
@@ -142,10 +141,11 @@ class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
 
+
     @jit.script_method
     def forward(self, x):
         x = 0.75*torch.sin(x/0.75)
-        return F.leaky_relu(x, 0.1)
+        return F.leaky_relu(x, 0.15)
 
 
 
@@ -231,8 +231,8 @@ class Critic(jit.ScriptModule):
     def cmin(self, state, action):
         xs = self.forward(state, action)
         xs = torch.cat([torch.mean(x, dim=-1, keepdim=True) for x in xs], dim=-1)
-        return torch.min(xs, dim=-1, keepdim=True).values
-
+        xs = torch.sort(xs, dim=-1).values
+        return (0.97*xs[:,0]+0.029*xs[:,1]+0.001*xs[:,2]).unsqueeze(1)
 
 
 # Define the algorithm
@@ -288,7 +288,7 @@ class Symphony(object):
             # cut list of the last 5 elements [Qn-3, Qn-2, Qn-1]
             self.q_next_old_policy = self.q_next_old_policy[-5:]
             # multiply last 5 elements with exp weights and sum, creating exponential weighted average
-            out = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-3 + 0.21 Qn-2 + 0.73 Qn-1]
+            out = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-5 + 0.1 Qn-4 + 0.16 Qn-3 + 0.21 Qn-2 + 0.43 Qn-1]
             #out = torch.FloatTensor(self.q_next_old_policy).mean()
             # append new q next target value to the list
             self.q_next_old_policy.append(q_next_target.mean().detach())
@@ -325,7 +325,6 @@ class Symphony(object):
 
 
 
-
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity, batch_lim, fade_factor=7.0):
 
@@ -336,7 +335,6 @@ class ReplayBuffer:
         self.fade_factor = fade_factor
         self.batch_lim = batch_lim
         self.ratio = 0.0
-
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
@@ -363,7 +361,6 @@ class ReplayBuffer:
             self.ratio = self.length/self.capacity
 
         
-
         self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
         self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
         self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
