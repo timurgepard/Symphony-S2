@@ -262,8 +262,8 @@ class Symphony(object):
         self.state_dim = state_dim
         self.action_dim = action_dim
         
-        self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0]
-        self.weights =  torch.FloatTensor([math.exp(-2.0), math.exp(-1.5), math.exp(-1.0),math.exp(-0.5), math.exp(0)])
+        self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self.weights =  torch.FloatTensor([math.exp(-1.5), math.exp(-1.25), math.exp(-1.0), math.exp(-0.75), math.exp(-0.5),math.exp(-0.25), math.exp(0)])
         self.weights = self.weights/self.weights.sum()
         #self.scaler = torch.cuda.amp.GradScaler()
 
@@ -286,7 +286,7 @@ class Symphony(object):
     def q_next_prev(self, q_next_target):
         with torch.no_grad():
             # cut list of the last 5 elements [Qn-3, Qn-2, Qn-1]
-            self.q_next_old_policy = self.q_next_old_policy[-5:]
+            self.q_next_old_policy = self.q_next_old_policy[-7:]
             # multiply last 5 elements with exp weights and sum, creating exponential weighted average
             out = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-5 + 0.1 Qn-4 + 0.16 Qn-3 + 0.21 Qn-2 + 0.43 Qn-1]
             #out = torch.FloatTensor(self.q_next_old_policy).mean()
@@ -299,7 +299,7 @@ class Symphony(object):
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.actor_optimizer.zero_grad(set_to_none=True)
         self.critic_optimizer.zero_grad(set_to_none=True)
-        k = 0.5*self.replay_buffer.ratio
+        k = self.replay_buffer.ratio
 
 
         with torch.no_grad():
