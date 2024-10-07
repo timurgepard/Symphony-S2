@@ -299,7 +299,7 @@ class Symphony(object):
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.actor_optimizer.zero_grad(set_to_none=True)
         self.critic_optimizer.zero_grad(set_to_none=True)
-        k = self.replay_buffer.ratio
+        k = 0.5*self.replay_buffer.ratio
 
 
         with torch.no_grad():
