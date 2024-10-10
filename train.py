@@ -22,20 +22,20 @@ print(device)
 
 #global parameters
 # environment type.
-option = 2
+option = 3
 
 
 explore_time = 5000
 tr_per_step = 5 # actor-critic updates per frame/step
-limit_step = 1000 #max steps per episode
+limit_step = 1280 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
 start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], False
 
 
-capacity = 300000
-batch_lim = 384
+capacity = 384000
+batch_lim = 768
 fade_factor = 10 # fading memory factor, flat region before gradual forgeting
 tau = 0.005
 
@@ -111,14 +111,7 @@ max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bou
 algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity, batch_lim, fade_factor)
 
 
-def init_weights(m):
-    if isinstance(m, nn.Linear): m.weight = torch.nn.init.xavier_uniform_(m.weight)
 
-def add_weights(m):
-    if isinstance(m, nn.Linear): m.weight += torch.nn.init.xavier_uniform_(m.weight)
-
-def scale_weights(m):
-    if isinstance(m, nn.Linear): m.weight = m.weight/explore_time
 
 
 #==============================================================================================
@@ -133,6 +126,16 @@ def hard_recovery(algo, replay_buffer, size):
     algo.replay_buffer.rewards[:size] = replay_buffer.rewards[:size]
     algo.replay_buffer.next_states[:size] = replay_buffer.next_states[:size]
     algo.replay_buffer.dones[:size] = replay_buffer.dones[:size]
+    algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
+    algo.replay_buffer.length = len(replay_buffer.indices)
+    algo.replay_buffer.batch_size = replay_buffer.batch_size
+
+def hard_recovery_to_bfloat16(algo, replay_buffer, size):
+    algo.replay_buffer.states[:size] = torch.tensor(replay_buffer.states[:size], dtype=torch.bfloat16, device=device)
+    algo.replay_buffer.actions[:size] = torch.tensor(replay_buffer.actions[:size], dtype=torch.bfloat16, device=device)
+    algo.replay_buffer.rewards[:size] = torch.tensor(replay_buffer.rewards[:size], dtype=torch.bfloat16, device=device)
+    algo.replay_buffer.next_states[:size] = torch.tensor(replay_buffer.next_states[:size], dtype=torch.bfloat16, device=device)
+    algo.replay_buffer.dones[:size] = torch.tensor(replay_buffer.dones[:size], dtype=torch.bfloat16, device=device)
     algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
     algo.replay_buffer.length = len(replay_buffer.indices)
     algo.replay_buffer.batch_size = replay_buffer.batch_size
@@ -167,17 +170,16 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
 
     for test_episode in range(test_episodes):
 
-        #---------------------1. decreases dependence on random seed: ---------------
-        r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
-        #print(r1, ", ", r2, ", ", r3)
-        torch.manual_seed(r1)
-        np.random.seed(r2)
-        random.seed(r3)
-
         state = env.reset()[0]
         rewards = []
 
         for steps in range(1,limit_step+1):
+
+            r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+            torch.manual_seed(r1)
+            np.random.seed(r2)
+            random.seed(r3)
+
             action = algo.select_action(state, mean=True)
             next_state, reward, done, truncated, info = env.step(action)
             rewards.append(reward)
@@ -207,7 +209,8 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        #hard_recovery(algo, dict['buffer'], 100000) # comment the previous line and chose a memory size to recover from old buffer
+        #hard_recovery(algo, dict['buffer'], 111250+20000) # comment the previous line and chose a memory size to recover from old buffer
+        #hard_recovery_to_bfloat16(algo, dict['buffer'], 158750+20000) # comment the previous line and chose a memory size to recover from old buffer
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
         total_steps = dict['total_steps']
@@ -223,9 +226,9 @@ except:
 
 try:
     print("loading models...")
-    algo.actor.load_state_dict(torch.load('actor_model.pt'))
-    algo.critic.load_state_dict(torch.load('critic_model.pt'))
-    algo.critic_target.load_state_dict(torch.load('critic_target_model.pt'))
+    algo.actor.load_state_dict(torch.load('actor_model.pt', weights_only=True))
+    algo.critic.load_state_dict(torch.load('critic_model.pt', weights_only=True))
+    algo.critic_target.load_state_dict(torch.load('critic_target_model.pt', weights_only=True))
     print('models loaded')
     #testing(env_test, limit_eval, 10)
 except:
@@ -245,9 +248,6 @@ if not Q_learning:
     log_file.write("experiment_started\n")
     total_steps = 0
 
-    algo.actor.apply(init_weights)
-    algo.critic.apply(init_weights)
-
 
     while not Q_learning:
         rewards = []
@@ -261,26 +261,21 @@ if not Q_learning:
             torch.manual_seed(r1)
             np.random.seed(r2)
             random.seed(r3)
-
-            #------------------learning will not depend on initial weights------------------------
-            algo.actor.apply(add_weights)
-            algo.critic.apply(add_weights)
-          
+         
 
             if total_steps>=explore_time and not Q_learning: Q_learning = True
             action = max_action.numpy()*np.random.uniform(-0.5, 1.0, size=action_dim)
             next_state, reward, done, truncated, info = env.step(action)
+            
             rewards.append(reward)
+            if done and abs(reward) == 100.0: reward /= 100.0 
             algo.replay_buffer.add(state, action, reward, next_state, done)
             state = next_state
             if done: break
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
 
-
-    algo.actor.apply(scale_weights)
-    algo.critic.apply(scale_weights)
-    algo.critic_target.load_state_dict(algo.critic.state_dict())
+    
 
     total_steps = 0
     print("copying explore data")
@@ -324,11 +319,13 @@ for i in range(start_episode, num_episodes):
         random.seed(r3)
 
         if (total_steps>=1250 and total_steps%1250==0):
+            #part = "_"+str(total_steps/1000) if total_steps%50000==0 else ""
+            part = ""
             testing(env_test, limit_step=limit_eval, test_episodes=100, current_step=total_steps, save_log=True)
-            torch.save(algo.actor.state_dict(), 'actor_model.pt')
-            torch.save(algo.critic.state_dict(), 'critic_model.pt')
-            torch.save(algo.critic_target.state_dict(), 'critic_target_model.pt')
-            with open('data', 'wb') as file:
+            torch.save(algo.actor.state_dict(), 'actor_model'+ part +'.pt')
+            torch.save(algo.critic.state_dict(), 'critic_model'+ part +'.pt')
+            torch.save(algo.critic_target.state_dict(), 'critic_target_model'+ part +'.pt')
+            with open('data'+ part, 'wb') as file:
                 pickle.dump({'buffer': algo.replay_buffer, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
             
 
@@ -336,8 +333,8 @@ for i in range(start_episode, num_episodes):
  
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
-        #if done and abs(reward) == 100.0: reward /= 100.0 
         rewards.append(reward)
+        if done and abs(reward) == 100.0: reward /= 100.0 
         algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train(tr_per_step)
         state = next_state
@@ -352,6 +349,8 @@ for i in range(start_episode, num_episodes):
 
 
     print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {episode_steps} | total_steps = {total_steps}")
+
+    log_file.write_opt(str(i) + ": " + str(round(episode_rewards_all[-1], 2)) + "\n")
 
 
  
