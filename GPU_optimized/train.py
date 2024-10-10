@@ -35,7 +35,7 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], F
 
 
 capacity = 384000
-batch_lim = 1280
+batch_lim = 768
 fade_factor = 10 # fading memory factor, flat region before gradual forgeting
 tau = 0.005
 
@@ -111,8 +111,6 @@ max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bou
 algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity, batch_lim, fade_factor)
 
 
-def init_weights(m):
-    if isinstance(m, nn.Linear): m.weight = torch.nn.init.xavier_uniform_(m.weight)
 
 
 
@@ -228,9 +226,9 @@ except:
 
 try:
     print("loading models...")
-    algo.actor.load_state_dict(torch.load('actor_model.pt'))
-    algo.critic.load_state_dict(torch.load('critic_model.pt'))
-    algo.critic_target.load_state_dict(torch.load('critic_target_model.pt'))
+    algo.actor.load_state_dict(torch.load('actor_model.pt', weights_only=True))
+    algo.critic.load_state_dict(torch.load('critic_model.pt', weights_only=True))
+    algo.critic_target.load_state_dict(torch.load('critic_target_model.pt', weights_only=True))
     print('models loaded')
     #testing(env_test, limit_eval, 10)
 except:
@@ -249,10 +247,6 @@ except:
 if not Q_learning:
     log_file.write("experiment_started\n")
     total_steps = 0
-
-    algo.actor.apply(init_weights)
-    algo.critic.apply(init_weights)
-    algo.critic_target.load_state_dict(algo.critic.state_dict())
 
 
     while not Q_learning:
@@ -285,7 +279,7 @@ if not Q_learning:
 
     total_steps = 0
     print("copying explore data")
-    explore_copy(algo.replay_buffer, explore_time, 4)
+    explore_copy(algo.replay_buffer, explore_time, 3)
     
     
 
