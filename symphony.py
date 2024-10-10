@@ -188,7 +188,7 @@ class Actor(jit.ScriptModule):
         )
 
         self.max_action = torch.mean(max_action).item()
-        self.scale = 0.2*self.max_action
+        self.scale = 0.1*self.max_action
         self.lim = 3.0*self.scale
 
     
@@ -200,7 +200,7 @@ class Actor(jit.ScriptModule):
     # Do not use any decorators with online random generators (Symphony updates seed each time)
     def soft(self, state):
         x = self.forward(state)
-        x += self.scale*torch.randn_like(x).clamp(-self.lim, self.lim)
+        x += (self.scale*torch.randn_like(x)).clamp(-self.lim, self.lim)
         return x.clamp(-self.max_action, self.max_action)
 
 
@@ -330,6 +330,7 @@ class Symphony(object):
 
         self.scaler.update()
         """
+        
         
         
 
