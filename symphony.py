@@ -188,7 +188,7 @@ class Actor(jit.ScriptModule):
         )
 
         self.max_action = torch.mean(max_action).item()
-        self.scale = 0.1*self.max_action
+        self.scale = 0.2*self.max_action
         self.lim = 3.0*self.scale
 
     
@@ -261,8 +261,8 @@ class Symphony(object):
         self.state_dim = state_dim
         self.action_dim = action_dim
         
-        self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        self.weights =  torch.FloatTensor([math.exp(-2.25), math.exp(-2.0), math.exp(-1.75), math.exp(-1.5), math.exp(-1.25), math.exp(-1.0), math.exp(-0.75), math.exp(-0.5),math.exp(-0.25), math.exp(0)])
+        self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self.weights =  torch.FloatTensor([math.exp(-1.5), math.exp(-1.25), math.exp(-1.0), math.exp(-0.75), math.exp(-0.5),math.exp(-0.25), math.exp(0)])
         self.weights = self.weights/self.weights.sum()
         #self.scaler = torch.amp.GradScaler('cuda')
 
@@ -285,7 +285,7 @@ class Symphony(object):
     def q_next_prev(self, q_next_target):
         with torch.no_grad():
             # cut list of the last 5 elements [Qn-3, Qn-2, Qn-1]
-            self.q_next_old_policy = self.q_next_old_policy[-10:]
+            self.q_next_old_policy = self.q_next_old_policy[-7:]
             # multiply last 5 elements with exp weights and sum, creating exponential weighted average
             out = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-5 + 0.1 Qn-4 + 0.16 Qn-3 + 0.21 Qn-2 + 0.43 Qn-1]
             # append new q next target value to the list
@@ -313,7 +313,7 @@ class Symphony(object):
         qs = self.critic(state, action)
         critic_loss = self.rehse(q, qs[0], k) + self.rehse(q, qs[1], k) + self.rehse(q, qs[2], k)
         
-
+        
         actor_loss.backward()
         self.actor_optimizer.step()
 
