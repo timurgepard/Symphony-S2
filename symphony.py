@@ -262,7 +262,7 @@ class Symphony(object):
         self.action_dim = action_dim
         
         self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        self.weights =  torch.FloatTensor([math.exp(-0.9), math.exp(-0.8), math.exp(-0.7), math.exp(-0.6), math.exp(-0.5), math.exp(-0.4), math.exp(-0.3), math.exp(-0.2), math.exp(-0.1), math.exp(0)])
+        self.weights =  torch.FloatTensor([math.exp(-0.45), math.exp(-0.4), math.exp(-0.35), math.exp(-0.3), math.exp(-0.25), math.exp(-0.2), math.exp(-0.15), math.exp(-0.1), math.exp(-0.05), math.exp(0)])
         self.weights = self.weights/self.weights.sum()
         #self.scaler = torch.amp.GradScaler('cuda')
 
@@ -310,14 +310,14 @@ class Symphony(object):
             for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param)
 
-        with torch.amp.autocast('cuda', dtype=torch.float32):
-            next_action = self.actor.soft(next_state)
-            q_next_target = self.critic_target.cmin(next_state, next_action, k)
-            actor_loss = -self.rehae(q_next_target,  self.q_next_prev(q_next_target), k)
+        #with torch.amp.autocast('cuda', dtype=torch.float32):
+        next_action = self.actor.soft(next_state)
+        q_next_target = self.critic_target.cmin(next_state, next_action, k)
+        actor_loss = -self.rehae(q_next_target,  self.q_next_prev(q_next_target), k)
 
-            q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
-            qs = self.critic(state, action)
-            critic_loss = self.rehse(q, qs[0], k) + self.rehse(q, qs[1], k) + self.rehse(q, qs[2], k)
+        q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
+        qs = self.critic(state, action)
+        critic_loss = self.rehse(q, qs[0], k) + self.rehse(q, qs[1], k) + self.rehse(q, qs[2], k)
 
         
         actor_loss.backward()
@@ -381,6 +381,8 @@ class ReplayBuffer:
             self.batch_size = min(max(64, self.length//300), self.batch_lim)
             
         if self.cnt<2.0*self.capacity: self.ratio = self.cnt/self.capacity
+            
+            
             
 
         
