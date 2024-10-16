@@ -371,6 +371,7 @@ class ReplayBuffer:
 
     def add(self, state, action, reward, next_state, done):
         idx = self.length-1
+        self.cnt += 1
         if self.length<self.capacity:
             self.length += 1
             self.indices.append(self.length-1)
@@ -379,6 +380,8 @@ class ReplayBuffer:
             self.batch_size = min(max(64, self.length//300), self.batch_lim)
             
         if self.cnt<2.0*self.capacity: self.ratio = self.cnt/self.capacity
+            
+            
             
 
         
