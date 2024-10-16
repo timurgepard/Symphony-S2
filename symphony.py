@@ -80,7 +80,7 @@ class ReHSE(jit.ScriptModule):
     @jit.script_method
     def forward(self, y1, y2, k:float):
         ae = torch.abs(y1-y2) + 1e-6
-        ae = ae**k*torch.tanh(k*ae)
+        ae = ae**k*torch.tanh(k*ae/2)
         return ae.mean()
 
 
@@ -93,7 +93,7 @@ class ReHAE(jit.ScriptModule):
     @jit.script_method
     def forward(self, y1, y2, k:float):
         e = (y1-y2) + 1e-6
-        e = torch.abs(e)**k*torch.tanh(k*e)
+        e = torch.abs(e)**k*torch.tanh(k*e/2)
         return e.mean()
 
 
@@ -261,8 +261,8 @@ class Symphony(object):
         self.state_dim = state_dim
         self.action_dim = action_dim
         
-        self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        self.weights =  torch.FloatTensor([math.exp(-1.5), math.exp(-1.25), math.exp(-1.0), math.exp(-0.75), math.exp(-0.5),math.exp(-0.25), math.exp(0)])
+        self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self.weights =  torch.FloatTensor([math.exp(-0.9), math.exp(-0.8), math.exp(-0.7), math.exp(-0.6), math.exp(-0.5), math.exp(-0.4), math.exp(-0.3), math.exp(-0.2), math.exp(-0.1), math.exp(0)])
         self.weights = self.weights/self.weights.sum()
         #self.scaler = torch.amp.GradScaler('cuda')
 
@@ -277,6 +277,12 @@ class Symphony(object):
 
 
     def train(self, tr_per_step=5):
+        #---------------------decreases dependence on random seed: ---------------
+        r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+        torch.manual_seed(r1)
+        np.random.seed(r2)
+        random.seed(r3)
+
         for _ in range(tr_per_step): self.update()
 
 
@@ -285,7 +291,7 @@ class Symphony(object):
     def q_next_prev(self, q_next_target):
         with torch.no_grad():
             # cut list of the last 5 elements [Qn-3, Qn-2, Qn-1]
-            self.q_next_old_policy = self.q_next_old_policy[-7:]
+            self.q_next_old_policy = self.q_next_old_policy[-10:]
             # multiply last 5 elements with exp weights and sum, creating exponential weighted average
             out = (torch.FloatTensor(self.q_next_old_policy)*self.weights).sum() # [0.06 Qn-5 + 0.1 Qn-4 + 0.16 Qn-3 + 0.21 Qn-2 + 0.43 Qn-1]
             # append new q next target value to the list
@@ -297,22 +303,22 @@ class Symphony(object):
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.actor_optimizer.zero_grad(set_to_none=True)
         self.critic_optimizer.zero_grad(set_to_none=True)
-        k = 0.5*self.replay_buffer.ratio
+        k = self.replay_buffer.ratio
 
 
         with torch.no_grad():
             for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param)
 
-        #with torch.amp.autocast('cuda', dtype=torch.float32):
-        next_action = self.actor.soft(next_state)
-        q_next_target = self.critic_target.cmin(next_state, next_action, k)
-        actor_loss = -self.rehae(q_next_target,  self.q_next_prev(q_next_target), k)
+        with torch.amp.autocast('cuda', dtype=torch.float32):
+            next_action = self.actor.soft(next_state)
+            q_next_target = self.critic_target.cmin(next_state, next_action, k)
+            actor_loss = -self.rehae(q_next_target,  self.q_next_prev(q_next_target), k)
 
-        q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
-        qs = self.critic(state, action)
-        critic_loss = self.rehse(q, qs[0], k) + self.rehse(q, qs[1], k) + self.rehse(q, qs[2], k)
-        
+            q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
+            qs = self.critic(state, action)
+            critic_loss = self.rehse(q, qs[0], k) + self.rehse(q, qs[1], k) + self.rehse(q, qs[2], k)
+
         
         actor_loss.backward()
         self.actor_optimizer.step()
@@ -343,12 +349,12 @@ class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity, batch_lim, fade_factor=7.0):
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = min(max(128, self.length//250), batch_lim) #in order for sample to describe population
+        self.batch_size = min(max(64, self.length//300), batch_lim) #in order for sample to describe population
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
         self.fade_factor = fade_factor
         self.batch_lim = batch_lim
-        self.ratio = 0.0
+        self.ratio, self.cnt = 0.0, 0
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
@@ -371,8 +377,10 @@ class ReplayBuffer:
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length) if self.length>1 else np.array([0.0])
-            self.batch_size = min(max(128, self.length//250), self.batch_lim)
-            self.ratio = self.length/self.capacity
+            self.batch_size = min(max(64, self.length//300), self.batch_lim)
+            
+        if self.cnt<2.0*self.capacity: self.ratio = self.cnt/self.capacity
+            
 
         
         self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
