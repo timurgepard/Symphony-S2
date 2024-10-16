@@ -262,7 +262,7 @@ class Symphony(object):
         self.action_dim = action_dim
         
         self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        self.weights =  torch.FloatTensor([math.exp(-0.9), math.exp(-0.8), math.exp(-0.7), math.exp(-0.6), math.exp(-0.5), math.exp(-0.4), math.exp(-0.3), math.exp(-0.2), math.exp(-0.1), math.exp(0)])
+        self.weights =  torch.FloatTensor([math.exp(-0.45), math.exp(-0.4), math.exp(-0.35), math.exp(-0.3), math.exp(-0.25), math.exp(-0.2), math.exp(-0.15), math.exp(-0.1), math.exp(-0.05), math.exp(0)])
         self.weights = self.weights/self.weights.sum()
         self.scaler = torch.amp.GradScaler('cuda')
 
