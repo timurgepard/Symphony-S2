@@ -256,14 +256,10 @@ if not Q_learning:
 
         for steps in range(1, limit_step+1):
             total_steps += 1
-
-            
         
-
             if total_steps>=explore_time and not Q_learning: Q_learning = True
             action = max_action.numpy()*np.random.uniform(-0.5, 1.0, size=action_dim)
             next_state, reward, done, truncated, info = env.step(action)
-            
             rewards.append(reward)
             #if done and abs(reward) == 100.0: reward /= 100.0 
             algo.replay_buffer.add(state, action, reward, next_state, done)
@@ -309,9 +305,9 @@ for i in range(start_episode, num_episodes):
         episode_steps += 1
         total_steps += 1
 
+        # save models, data
         if (total_steps>=1250 and total_steps%1250==0):
-            #part = "_"+str(total_steps/1000) if total_steps%50000==0 else ""
-            part = ""
+            part = "_"+str(total_steps/1000) if total_steps%100000==0 else ""
             testing(env_test, limit_step=limit_eval, test_episodes=100, current_step=total_steps, save_log=True)
             torch.save(algo.actor.state_dict(), 'actor_model'+ part +'.pt')
             torch.save(algo.critic.state_dict(), 'critic_model'+ part +'.pt')
@@ -319,7 +315,6 @@ for i in range(start_episode, num_episodes):
             with open('data'+ part, 'wb') as file:
                 pickle.dump({'buffer': algo.replay_buffer, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
             
-
 
  
         action = algo.select_action(state)
