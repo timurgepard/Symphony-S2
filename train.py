@@ -262,7 +262,7 @@ if not Q_learning:
             next_state, reward, done, truncated, info = env.step(action)
             rewards.append(reward)
             #if done and abs(reward) == 100.0: reward /= 100.0 
-            if steps>=2: algo.replay_buffer.add(state, action, reward, next_state, done)
+            algo.replay_buffer.add(state, action, reward, next_state, done)
             state = next_state
             if done: break
         Return = np.sum(rewards)
@@ -321,7 +321,7 @@ for i in range(start_episode, num_episodes):
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
         #if done and abs(reward) == 100.0: reward /= 100.0 
-        if steps>=2: algo.replay_buffer.add(state, action, reward, next_state, done)
+        algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train(tr_per_step)
         state = next_state
         if done: break
