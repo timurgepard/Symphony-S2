@@ -31,11 +31,11 @@ limit_step = 1280 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
 start_episode = 1 #number for the identification of the current episode
-episode_rewards_all, episode_steps_all, test_rewards, Q_learning = [], [], [], False
+episode_rewards_all, episode_steps_all, test_rewards, Q_learning, average_steps = [], [], [], False, 0
 
 
-capacity = 384000
-batch_lim = 768
+capacity = 307200
+batch_lim = 1024
 fade_factor = 10 # fading memory factor, flat region before gradual forgeting
 tau = 0.005
 
@@ -73,6 +73,7 @@ elif option == 5:
 
 
 elif option == 6:
+    limit_step = 10000
     env = gym.make('BipedalWalker-v3')
     env_test = gym.make('BipedalWalker-v3')
 
@@ -256,19 +257,15 @@ if not Q_learning:
         for steps in range(1, limit_step+1):
             total_steps += 1
 
-            #---------------------decreases dependence on random seed: ---------------
-            r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
-            torch.manual_seed(r1)
-            np.random.seed(r2)
-            random.seed(r3)
-         
+            
+        
 
             if total_steps>=explore_time and not Q_learning: Q_learning = True
             action = max_action.numpy()*np.random.uniform(-0.5, 1.0, size=action_dim)
             next_state, reward, done, truncated, info = env.step(action)
             
             rewards.append(reward)
-            if done and abs(reward) == 100.0: reward /= 100.0 
+            #if done and abs(reward) == 100.0: reward /= 100.0 
             algo.replay_buffer.add(state, action, reward, next_state, done)
             state = next_state
             if done: break
@@ -312,12 +309,6 @@ for i in range(start_episode, num_episodes):
         episode_steps += 1
         total_steps += 1
 
-        #---------------------1. decreases dependence on random seed: ---------------
-        r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
-        torch.manual_seed(r1)
-        np.random.seed(r2)
-        random.seed(r3)
-
         if (total_steps>=1250 and total_steps%1250==0):
             #part = "_"+str(total_steps/1000) if total_steps%50000==0 else ""
             part = ""
@@ -334,7 +325,7 @@ for i in range(start_episode, num_episodes):
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
-        if done and abs(reward) == 100.0: reward /= 100.0 
+        #if done and abs(reward) == 100.0: reward /= 100.0 
         algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train(tr_per_step)
         state = next_state
