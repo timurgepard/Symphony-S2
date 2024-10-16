@@ -372,6 +372,7 @@ class ReplayBuffer:
 
     def add(self, state, action, reward, next_state, done):
         idx = self.length-1
+        self.cnt += 1
         if self.length<self.capacity:
             self.length += 1
             self.indices.append(self.length-1)
