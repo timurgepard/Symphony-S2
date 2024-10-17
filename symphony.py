@@ -248,6 +248,7 @@ class Symphony(object):
 
         self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=3.33e-4)
         self.actor_optimizer = optim.RMSprop(self.actor.parameters(), lr=2.33e-4)
+        self.lr_step = 0
 
 
         self.rehse = ReHSE()
@@ -262,7 +263,7 @@ class Symphony(object):
         self.action_dim = action_dim
         
         self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        self.weights =  torch.FloatTensor([math.exp(-0.72), math.exp(-0.64), math.exp(-0.56), math.exp(-0.48), math.exp(-0.40), math.exp(-0.32), math.exp(-0.24), math.exp(-0.16), math.exp(-0.08), math.exp(0)])
+        self.weights =  torch.FloatTensor([math.exp(-0.9), math.exp(-0.8), math.exp(-0.7), math.exp(-0.6), math.exp(-0.5), math.exp(-0.4), math.exp(-0.3), math.exp(-0.2), math.exp(-0.1), math.exp(0)])
         self.weights = self.weights/self.weights.sum()
         #self.scaler = torch.amp.GradScaler('cuda')
 
@@ -274,6 +275,13 @@ class Symphony(object):
         with torch.no_grad(): action = self.actor(state) if mean else self.actor.soft(state)
         return action.cpu().data.numpy().flatten()
 
+    def lr_schedule_step(self):
+        self.lr_step += 1
+        if self.lr_step%10000!=0.0: return
+        self.critic_optimizer = optim.RMSprop(self.critic.parameters(), lr=3.33e-4)
+        self.actor_optimizer = optim.RMSprop(self.actor.parameters(), lr=2.33e-4)
+        
+
 
     def train(self, tr_per_step=5):
         # decreases dependence on random seeds:
@@ -281,6 +289,9 @@ class Symphony(object):
         torch.manual_seed(r1)
         np.random.seed(r2)
         random.seed(r3)
+        # each 10000 environment steps we restart learning rate after starting training:
+        self.lr_schedule_step()
+
         for _ in range(tr_per_step): self.update()
 
 
