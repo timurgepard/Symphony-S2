@@ -263,7 +263,7 @@ class Symphony(object):
         self.action_dim = action_dim
         
         self.q_next_old_policy = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        self.weights =  torch.FloatTensor([math.exp(-0.9), math.exp(-0.8), math.exp(-0.7), math.exp(-0.6), math.exp(-0.5), math.exp(-0.4), math.exp(-0.3), math.exp(-0.2), math.exp(-0.1), math.exp(0)])
+        self.weights =  torch.FloatTensor([math.exp(-0.72), math.exp(-0.64), math.exp(-0.56), math.exp(-0.48), math.exp(-0.40), math.exp(-0.32), math.exp(-0.24), math.exp(-0.16), math.exp(-0.08), math.exp(0)])
         self.weights = self.weights/self.weights.sum()
         self.scaler = torch.amp.GradScaler('cuda')
 
@@ -290,7 +290,7 @@ class Symphony(object):
         np.random.seed(r2)
         random.seed(r3)
         # each 10000 environment steps we restart learning rate after starting training:
-        self.lr_schedule_step()
+        #self.lr_schedule_step()
 
         for _ in range(tr_per_step): self.update()
 
