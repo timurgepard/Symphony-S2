@@ -36,7 +36,6 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning, average_steps 
 
 
 capacity = 384000
-batch_lim = 512
 tau = 0.005
 
 
@@ -108,7 +107,7 @@ action_dim= env.action_space.shape[0]
 print('action space high', env.action_space.high)
 max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else 1.0
 
-algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity, batch_lim)
+algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity)
 
 
 
