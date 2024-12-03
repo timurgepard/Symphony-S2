@@ -239,9 +239,9 @@ class ActorCritic(jit.ScriptModule):
 
 # Define the algorithm
 class Symphony(object):
-    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.005, capacity=300000, batch_lim = 768):
+    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.005, capacity=300000):
 
-        self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity, batch_lim)
+        self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity)
 
         self.nets = ActorCritic(state_dim, action_dim, max_action=max_action,).to(device)
         self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action,).to(device)
@@ -323,9 +323,9 @@ class Symphony(object):
 
 
 class ReplayBuffer:
-    def __init__(self, state_dim, action_dim, device, capacity, batch_lim):
+    def __init__(self, state_dim, action_dim, device, capacity):
 
-        self.capacity, self.length, self.batch_lim, self.device = capacity, 0, batch_lim, device
+        self.capacity, self.length, self.device = capacity, 0, device
         self.batch_size = 32 + self.length//1000 #in order for sample to describe population
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
