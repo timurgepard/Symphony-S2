@@ -197,8 +197,8 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def oxygen(self):
-        if self.window<1: self.window += 1e-6
-        self.max_limit.copy_(self.window*self.max_action)
+        self.window += 5e-6
+        self.max_limit.copy_(min(self.window, 1)*self.max_action)
         self.lin.copy_(0.7*self.max_limit)
         self.std.copy_(0.3*self.max_limit)
 
@@ -265,12 +265,6 @@ class Symphony(object):
         self.scaler = torch.amp.GradScaler("cuda")
 
 
-        self.exp_size = 10
-        self.history = self.exp_size*[0.0]
-        self.weights =  torch.exp(torch.linspace(self.exp_size*-0.5, -0.5, steps=self.exp_size))
-        self.weights = self.weights/self.weights.sum()
-
-
 
 
     def select_action(self, state, mean=False):
@@ -291,17 +285,6 @@ class Symphony(object):
         for _ in range(tr_per_step): self.update()
 
 
-    def feedback(self, element):
-        with torch.no_grad():
-            # cut list of the last N elements
-            # multiply last N elements with exp weights and sum, creating exponential weighted average
-            # append new element to the list
-            self.history = self.history[-self.exp_size:]
-            out = (torch.FloatTensor(self.history)*self.weights).sum()
-            self.history.append(element.mean().detach())
-            return out
-
-
 
     def update(self):
 
@@ -316,8 +299,8 @@ class Symphony(object):
             q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
             qs = self.nets.critic(state, action)
 
-            adv_next_target = q_next_target-self.feedback(q_next_target)
-            actor_loss = -(self.rehae(adv_next_target, k) +self.rehse(s2_next_target, k))
+
+            actor_loss = -1/10*(self.rehae(q_next_target, k) + self.rehse(s2_next_target, k))
             critic_loss = (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
 
             nets_loss = actor_loss + critic_loss
