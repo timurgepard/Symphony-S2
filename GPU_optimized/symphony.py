@@ -189,6 +189,7 @@ class ActorCritic(jit.ScriptModule):
         self.max_action = nn.Parameter(data=max_action, requires_grad=False)
 
         self.window = 0.333
+        self.window_step = 3e-4/(10+state_dim+action_dim)
 
         self.max_limit = nn.Parameter(data=self.window*self.max_action, requires_grad=False)
         self.lin = nn.Parameter(data=0.7*self.max_limit, requires_grad=False)
@@ -196,8 +197,8 @@ class ActorCritic(jit.ScriptModule):
 
 
     @jit.script_method
-    def oxygen(self):
-        self.window += 5e-6
+    def epsilon(self):
+        self.window += self.window_step
         self.max_limit.copy_(min(self.window, 1)*self.max_action)
         self.lin.copy_(0.7*self.max_limit)
         self.std.copy_(0.3*self.max_limit)
@@ -264,6 +265,10 @@ class Symphony(object):
 
         self.scaler = torch.amp.GradScaler("cuda")
 
+        self.exp_size = 10
+        self.history = self.exp_size*[0.0]
+        self.weights =  torch.exp(torch.linspace(self.exp_size*-0.3, -0.3, steps=self.exp_size))
+        self.weights = self.weights/self.weights.sum()
 
 
 
@@ -271,8 +276,6 @@ class Symphony(object):
         state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
         with torch.no_grad(): action = self.nets_target.actor(state) if mean else self.nets_target.actor_soft(state)
         return action.cpu().data.numpy().flatten()
-
-
 
 
     def train(self, tr_per_step=5):
@@ -285,13 +288,24 @@ class Symphony(object):
         for _ in range(tr_per_step): self.update()
 
 
+    def feedback(self, element):
+        with torch.no_grad():
+            # cut list of the last N elements
+            # multiply last N elements with exp weights and sum, creating exponential weighted average
+            # append new element to the list
+            self.history = self.history[-self.exp_size:]
+            out = (torch.FloatTensor(self.history)*self.weights).sum()
+            self.history.append(element.mean().detach())
+            return out
+
+
 
     def update(self):
 
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
         k = 0.5*self.replay_buffer.ratio
-        self.nets.oxygen()
+        self.nets.epsilon()
 
         with torch.amp.autocast("cuda", dtype=torch.bfloat16):
             next_action = self.nets.actor_soft(next_state)
@@ -299,8 +313,8 @@ class Symphony(object):
             q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
             qs = self.nets.critic(state, action)
 
-
-            actor_loss = -1/10*(self.rehae(q_next_target, k) + self.rehse(s2_next_target, k))
+            adv_next_target = q_next_target-self.feedback(q_next_target)
+            actor_loss = -(self.rehae(adv_next_target, k) +self.rehse(s2_next_target, k))
             critic_loss = (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
 
             nets_loss = actor_loss + critic_loss
@@ -326,7 +340,7 @@ class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity):
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = 32 + self.length//1000 #in order for sample to describe population
+        self.batch_size = 64 + min(self.length//500, 512) #in order for sample to describe population
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
         self.ratio = 0.0
@@ -355,7 +369,7 @@ class ReplayBuffer:
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length) if self.length>1 else np.array([0.0])
-            self.batch_size = 32 + self.length//1000
+            self.batch_size = 64 + min(self.length//500, 512)
             self.ratio = self.length/self.capacity
             
             
