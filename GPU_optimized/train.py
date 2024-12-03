@@ -210,6 +210,8 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
+        algo.nets.window = dict['window']
+        algo.nets_target.window = dict['window_target']
         #hard_recovery(algo, dict['buffer'], 200000+20000) # comment the previous line and chose a memory size to recover from old buffer
         #hard_recovery_to_bfloat16(algo, dict['buffer'], 158750+20000) # comment the previous line and chose a memory size to recover from old buffer
         episode_rewards_all = dict['episode_rewards_all']
@@ -311,7 +313,7 @@ for i in range(start_episode, num_episodes):
             torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
             torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
             with open('data'+ part, 'wb') as file:
-                pickle.dump({'buffer': algo.replay_buffer, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
+                pickle.dump({'buffer': algo.replay_buffer, 'window': algo.nets.window, 'window_target': algo.nets_target.window, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
             
 
  
