@@ -262,7 +262,6 @@ class Symphony(object):
         self.action_dim = action_dim
         self.device = device
 
-        self.scaler = torch.amp.GradScaler("cuda")
 
 
 
