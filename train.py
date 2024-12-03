@@ -23,7 +23,7 @@ print(device)
 
 #global parameters
 # environment type.
-option = 3
+option = 1
 
 
 explore_time = 5000
@@ -36,7 +36,6 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning, average_steps 
 
 
 capacity = 384000
-batch_lim = 384
 tau = 0.005
 
 
@@ -50,7 +49,7 @@ elif option == 0:
     env_test = gym.make('MountainCarContinuous-v0')
 
 elif option == 1:
-    env = gym.make('HalfCheetah-v4')
+    env = gym.make('HalfCheetah-v4', render_mode="human")
     env_test = gym.make('HalfCheetah-v4')
 
 elif option == 2:
@@ -108,7 +107,7 @@ action_dim= env.action_space.shape[0]
 print('action space high', env.action_space.high)
 max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else 1.0
 
-algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity, batch_lim)
+algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity)
 
 
 
