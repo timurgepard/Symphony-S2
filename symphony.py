@@ -289,7 +289,7 @@ class Symphony(object):
 
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
-        k = 0.5*self.replay_buffer.power
+        k = 0.5*self.replay_buffer.ratio
         self.nets.oxygen()
 
 
@@ -324,7 +324,7 @@ class ReplayBuffer:
         self.batch_size = 32 + self.length//1000 #in order for sample to describe population
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
-        self.power = 0.0
+        self.ratio = 0.0
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
@@ -351,7 +351,7 @@ class ReplayBuffer:
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length) if self.length>1 else np.array([0.0])
             self.batch_size = 32 + self.length//1000
-            self.power = self.length/self.capacity
+            self.ratio = self.length/self.capacity
             
             
 
