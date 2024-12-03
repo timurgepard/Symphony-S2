@@ -11,6 +11,7 @@ import math
 from symphony import Symphony, log_file
 
 
+
 #==============================================================================================
 #==============================================================================================
 #===================================SCRIPT FOR TRAINING========================================
@@ -27,16 +28,15 @@ option = 3
 
 explore_time = 5000
 tr_per_step = 5 # actor-critic updates per frame/step
-limit_step = 1280 #max steps per episode
+limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
 start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning, average_steps = [], [], [], False, 0
 
 
-capacity = 307200
-batch_lim = 1024
-fade_factor = 10 # fading memory factor, flat region before gradual forgeting
+capacity = 384000
+batch_lim = 384
 tau = 0.005
 
 
@@ -65,15 +65,14 @@ elif option == 4:
     limit_step = 300
     limit_eval = 300
     env = gym.make('HumanoidStandup-v4')
-    env_test = gym.make('HumanoidStandup-v4', render_mode="human")
+    env_test = gym.make('HumanoidStandup-v4')
 
 elif option == 5:
-    env = gym.make('Ant-v4', render_mode="human")
+    env = gym.make('Ant-v4')
     env_test = gym.make('Ant-v4')
 
 
 elif option == 6:
-    limit_step = 10000
     env = gym.make('BipedalWalker-v3')
     env_test = gym.make('BipedalWalker-v3')
 
@@ -85,18 +84,18 @@ elif option == 8:
     limit_step = 700
     limit_eval = 700
     env = gym.make('LunarLanderContinuous-v2')
-    env_test = gym.make('LunarLanderContinuous-v2', render_mode="human")
+    env_test = gym.make('LunarLanderContinuous-v2')
 
 elif option == 9:
     limit_step = 300
     limit_eval = 200
     env = gym.make('Pusher-v4')
-    env_test = gym.make('Pusher-v4', render_mode="human")
+    env_test = gym.make('Pusher-v4')
 
 elif option == 10:
     burst = True
     env = gym.make('Swimmer-v4')
-    env_test = gym.make('Swimmer-v4', render_mode="human")
+    env_test = gym.make('Swimmer-v4')
 
 elif option == 11:
     env = gym.make('Hopper-v4')
@@ -109,7 +108,7 @@ action_dim= env.action_space.shape[0]
 print('action space high', env.action_space.high)
 max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else 1.0
 
-algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity, batch_lim, fade_factor)
+algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity, batch_lim)
 
 
 
@@ -129,6 +128,7 @@ def hard_recovery(algo, replay_buffer, size):
     algo.replay_buffer.dones[:size] = replay_buffer.dones[:size]
     algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
     algo.replay_buffer.length = len(replay_buffer.indices)
+    algo.replay_buffer.cnt = replay_buffer.cnt
     algo.replay_buffer.batch_size = replay_buffer.batch_size
 
 def hard_recovery_to_bfloat16(algo, replay_buffer, size):
@@ -139,6 +139,7 @@ def hard_recovery_to_bfloat16(algo, replay_buffer, size):
     algo.replay_buffer.dones[:size] = torch.tensor(replay_buffer.dones[:size], dtype=torch.bfloat16, device=device)
     algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
     algo.replay_buffer.length = len(replay_buffer.indices)
+    algo.replay_buffer.cnt = replay_buffer.cnt
     algo.replay_buffer.batch_size = replay_buffer.batch_size
 
 
@@ -210,7 +211,7 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        #hard_recovery(algo, dict['buffer'], 111250+20000) # comment the previous line and chose a memory size to recover from old buffer
+        #hard_recovery(algo, dict['buffer'], 200000+20000) # comment the previous line and chose a memory size to recover from old buffer
         #hard_recovery_to_bfloat16(algo, dict['buffer'], 158750+20000) # comment the previous line and chose a memory size to recover from old buffer
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
@@ -227,9 +228,8 @@ except:
 
 try:
     print("loading models...")
-    algo.actor.load_state_dict(torch.load('actor_model.pt', weights_only=True))
-    algo.critic.load_state_dict(torch.load('critic_model.pt', weights_only=True))
-    algo.critic_target.load_state_dict(torch.load('critic_target_model.pt', weights_only=True))
+    algo.nets.load_state_dict(torch.load('nets_model.pt', weights_only=True))
+    algo.nets_target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
     print('models loaded')
     #testing(env_test, limit_eval, 10)
 except:
@@ -246,22 +246,23 @@ except:
 
 
 if not Q_learning:
-    log_file.write("experiment_started\n")
+    log_file.clean()
     total_steps = 0
 
 
     while not Q_learning:
         rewards = []
-        state = env.reset()[0]
+        state = env_test.reset()[0]
 
         for steps in range(1, limit_step+1):
             total_steps += 1
         
             if total_steps>=explore_time and not Q_learning: Q_learning = True
-            action = max_action.numpy()*np.random.uniform(-0.5, 1.0, size=action_dim)
-            next_state, reward, done, truncated, info = env.step(action)
+            action = max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim)
+            #action = algo.select_action(state)
+            next_state, reward, done, truncated, info = env_test.step(action)
             rewards.append(reward)
-            #if done and abs(reward) == 100.0: reward /= 100.0 
+            if done and abs(reward) == 100.0: reward /= 50.0 
             algo.replay_buffer.add(state, action, reward, next_state, done)
             state = next_state
             if done: break
@@ -274,8 +275,6 @@ if not Q_learning:
     print("copying explore data")
     explore_copy(algo.replay_buffer, explore_time, 3)
     
-    
-
 
 
 #==============================================================================================
@@ -300,18 +299,18 @@ for i in range(start_episode, num_episodes):
     #--------------------2. CPU/GPU cooling ------------------
     time.sleep(0.75)
 
-        
+
     for steps in range(1, limit_step+1):
         episode_steps += 1
         total_steps += 1
 
         # save models, data
         if (total_steps>=1250 and total_steps%1250==0):
-            part = "_"+str(total_steps/1000) if total_steps%100000==0 else ""
-            testing(env_test, limit_step=limit_eval, test_episodes=100, current_step=total_steps, save_log=True)
-            torch.save(algo.actor.state_dict(), 'actor_model'+ part +'.pt')
-            torch.save(algo.critic.state_dict(), 'critic_model'+ part +'.pt')
-            torch.save(algo.critic_target.state_dict(), 'critic_target_model'+ part +'.pt')
+            part = ""
+            #part = "_"+str(total_steps/1000) if total_steps%300000==0 else ""
+            testing(env_test, limit_step=limit_eval, test_episodes=25, current_step=total_steps, save_log=True)
+            torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
+            torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
             with open('data'+ part, 'wb') as file:
                 pickle.dump({'buffer': algo.replay_buffer, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
             
@@ -320,7 +319,7 @@ for i in range(start_episode, num_episodes):
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
-        #if done and abs(reward) == 100.0: reward /= 100.0 
+        if done and abs(reward) == 100.0: reward /= 50.0 
         algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train(tr_per_step)
         state = next_state
