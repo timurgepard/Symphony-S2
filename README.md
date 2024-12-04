@@ -15,10 +15,7 @@ Some ideas were dropped and some proven their worth were solidified:
 4. Rectified Huber Symmetric and Asymmetric Loss Functions ✅
 5. Seamless Actor-Critic updates ✅ (though UTD-5)
 6. Silent Dropouts ✅
-
-1. <del>"movement is life" concept</del> ❌
-2. <del>reduced objective to learn Bellman's sum of dumped reward's variance</del> ❌
-3. <del>improve reward variance through immediate Advantage</del> ❌
+7. Q variance improvement ✅
 
 Some modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule.
 
