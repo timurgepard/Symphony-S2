@@ -178,7 +178,7 @@ class ActorCritic(jit.ScriptModule):
 
         self.a = FeedForward(768+state_dim, action_dim)
 
-        self.qdim=320
+        self.qdim=math.sqrt(320*3)
 
         self.qA = FeedForward(state_dim+action_dim, 320)
         self.qB = FeedForward(state_dim+action_dim, 320)
@@ -189,7 +189,7 @@ class ActorCritic(jit.ScriptModule):
         self.max_action = nn.Parameter(data=max_action, requires_grad=False)
 
         self.window = 0.333
-        self.window_step = 3e-4/(10+state_dim+action_dim)
+        self.window_step = (1/10*3e-4)/action_dim
 
         self.max_limit = nn.Parameter(data=self.window*self.max_action, requires_grad=False)
         self.lin = nn.Parameter(data=0.7*self.max_limit, requires_grad=False)
@@ -203,16 +203,13 @@ class ActorCritic(jit.ScriptModule):
         self.lin.copy_(0.7*self.max_limit)
         self.std.copy_(0.3*self.max_limit)
 
+    #========= Actor Forward Pass =========
+
     @jit.script_method
     def actor(self, state):
         state = torch.cat([self.inA(state), self.inB(state), self.inC(state), state], dim=-1)
         x = self.a(state)
         return self.max_limit*torch.tanh(x/self.max_limit)
-
-    @jit.script_method
-    def critic(self, state, action):
-        x = torch.cat([state, action], -1)
-        return [qnet(x) for qnet in self.qnets]
 
 
     @jit.script_method
@@ -226,14 +223,20 @@ class ActorCritic(jit.ScriptModule):
         x += (self.std*torch.randn_like(x)).clamp(-2.5*self.std, 2.5*self.std)
         return torch.where(torch.abs(x)<self.lin, x, self.squash(x))
 
+    #========= Critic Forward Pass =========
+
+    @jit.script_method
+    def critic(self, state, action):
+        x = torch.cat([state, action], -1)
+        return [qnet(x) for qnet in self.qnets]
 
     # take 3 distributions and concatenate them
     @jit.script_method
     def critic_soft(self, state, action):
         q = torch.cat(self.critic(state, action), dim=-1)
         q_mean = torch.mean(q, dim=-1, keepdim=True)
-        s = (q_mean-q)/self.qdim
-        return q_mean, s*torch.tanh(s)
+        #s = (q_mean-q)/self.qdim
+        return q_mean#, s*torch.tanh(s)
 
 
 
@@ -309,12 +312,13 @@ class Symphony(object):
 
         with torch.amp.autocast("cuda", dtype=torch.bfloat16):
             next_action = self.nets.actor_soft(next_state)
-            q_next_target, s2_next_target  = self.nets_target.critic_soft(next_state, next_action)
+            #q_next_target, s2_next_target  = self.nets_target.critic_soft(next_state, next_action)
+            q_next_target  = self.nets_target.critic_soft(next_state, next_action)
             q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
             qs = self.nets.critic(state, action)
 
             adv_next_target = q_next_target-self.feedback(q_next_target)
-            actor_loss = -(self.rehae(adv_next_target, k) +self.rehse(s2_next_target, k))
+            actor_loss = -self.rehae(adv_next_target, k) #-self.rehse(s2_next_target, k)
             critic_loss = (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
 
             nets_loss = actor_loss + critic_loss
@@ -327,6 +331,7 @@ class Symphony(object):
         self.scaler.scale(nets_loss).backward()
         self.scaler.step(self.nets_optimizer)
         self.scaler.update()
+        
 
         with torch.no_grad():
             for target_param, param in zip(self.nets_target.parameters(), self.nets.parameters()):
