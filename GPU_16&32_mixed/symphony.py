@@ -189,7 +189,7 @@ class ActorCritic(jit.ScriptModule):
         self.max_action = nn.Parameter(data=max_action, requires_grad=False)
 
         self.window = 0.333
-        self.window_step = 3e-4/(state_dim*action_dim)
+        self.window_step = 1/2*3e-4/(state_dim*action_dim)
 
         self.max_limit = nn.Parameter(data=self.window*self.max_action, requires_grad=False)
         self.lin = nn.Parameter(data=0.7*self.max_limit, requires_grad=False)
