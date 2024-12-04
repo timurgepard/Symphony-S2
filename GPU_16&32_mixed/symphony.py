@@ -312,13 +312,12 @@ class Symphony(object):
 
         with torch.amp.autocast("cuda", dtype=torch.bfloat16):
             next_action = self.nets.actor_soft(next_state)
-            #q_next_target, s2_next_target  = self.nets_target.critic_soft(next_state, next_action)
-            q_next_target  = self.nets_target.critic_soft(next_state, next_action)
+            q_next_target, s2_next_target  = self.nets_target.critic_soft(next_state, next_action)
             q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
             qs = self.nets.critic(state, action)
 
             adv_next_target = q_next_target-self.feedback(q_next_target)
-            actor_loss = -self.rehae(adv_next_target, k) #-self.rehse(s2_next_target, k)
+            actor_loss = -self.rehae(adv_next_target, k) -self.rehse(s2_next_target, k)
             critic_loss = (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
 
             nets_loss = actor_loss + critic_loss
