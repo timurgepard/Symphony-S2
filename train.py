@@ -49,7 +49,7 @@ elif option == 0:
     env_test = gym.make('MountainCarContinuous-v0')
 
 elif option == 1:
-    env = gym.make('HalfCheetah-v4')
+    env = gym.make('HalfCheetah-v4', render_mode="human")
     env_test = gym.make('HalfCheetah-v4')
 
 elif option == 2:
@@ -72,7 +72,7 @@ elif option == 5:
 
 
 elif option == 6:
-    env = gym.make('BipedalWalker-v3')
+    env = gym.make('BipedalWalker-v3', render_mode="human")
     env_test = gym.make('BipedalWalker-v3')
 
 elif option == 7:
