@@ -189,7 +189,7 @@ class ActorCritic(jit.ScriptModule):
         self.max_action = nn.Parameter(data=max_action, requires_grad=False)
 
         self.window = 0.333
-        self.window_step = (1/10*3e-4)/action_dim
+        self.window_step = 3e-4/(state_dim*action_dim)
 
         self.max_limit = nn.Parameter(data=self.window*self.max_action, requires_grad=False)
         self.lin = nn.Parameter(data=0.7*self.max_limit, requires_grad=False)
@@ -316,12 +316,12 @@ class Symphony(object):
         qs = self.nets.critic(state, action)
 
         adv_next_target = q_next_target-self.feedback(q_next_target)
-        actor_loss = -self.rehae(adv_next_target, k) #-self.rehse(s2_next_target, k)
+        actor_loss = -self.rehae(adv_next_target, k) -self.rehse(s2_next_target, k)
         critic_loss = (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
 
         nets_loss = actor_loss + critic_loss
 
-
+        
         nets_loss.backward()
         self.nets_optimizer.step()
 
