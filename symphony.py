@@ -266,7 +266,6 @@ class Symphony(object):
         self.action_dim = action_dim
         self.device = device
 
-
         self.exp_size = 10
         self.history = self.exp_size*[0.0]
         self.weights =  torch.exp(torch.linspace(self.exp_size*-0.3, -0.3, steps=self.exp_size))
@@ -321,11 +320,10 @@ class Symphony(object):
 
         nets_loss = actor_loss + critic_loss
 
-        
+
         nets_loss.backward()
         self.nets_optimizer.step()
 
-        
 
         with torch.no_grad():
             for target_param, param in zip(self.nets_target.parameters(), self.nets.parameters()):
@@ -339,7 +337,7 @@ class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity):
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = 64 + min(self.length//333, 704) #in order for sample to describe population
+        self.batch_size = 64 + min(self.length//384, 512) #in order for sample to describe population
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
         self.ratio = 0.0
@@ -368,7 +366,7 @@ class ReplayBuffer:
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length) if self.length>1 else np.array([0.0])
-            self.batch_size = 64 + min(self.length//333, 704)
+            self.batch_size = 64 + min(self.length//384, 512)
             self.ratio = self.length/self.capacity
             
             
