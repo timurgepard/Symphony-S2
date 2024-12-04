@@ -235,8 +235,8 @@ class ActorCritic(jit.ScriptModule):
     def critic_soft(self, state, action):
         q = torch.cat(self.critic(state, action), dim=-1)
         q_mean = torch.mean(q, dim=-1, keepdim=True)
-        #s = (q_mean-q)/self.qdim
-        return q_mean#, s*torch.tanh(s)
+        s = (q_mean-q)/self.qdim
+        return q_mean, s*torch.tanh(s)
 
 
 
