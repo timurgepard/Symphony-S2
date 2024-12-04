@@ -178,11 +178,11 @@ class ActorCritic(jit.ScriptModule):
 
         self.a = FeedForward(768+state_dim, action_dim)
 
-        self.qdim=math.sqrt(320*3)
+        self.qdim=math.sqrt(128*3)
 
-        self.qA = FeedForward(state_dim+action_dim, 320)
-        self.qB = FeedForward(state_dim+action_dim, 320)
-        self.qC = FeedForward(state_dim+action_dim, 320)
+        self.qA = FeedForward(state_dim+action_dim, 128)
+        self.qB = FeedForward(state_dim+action_dim, 128)
+        self.qC = FeedForward(state_dim+action_dim, 128)
 
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
 
