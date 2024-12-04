@@ -17,7 +17,7 @@ Some ideas were dropped and some proven their worth were solidified:
 6. Silent Dropouts ✅
 7. Q variance improvement ✅
 
-Some modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule.
+modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule.
 
 Architecture:
 ![image](https://github.com/user-attachments/assets/03a884cb-a613-4d7c-949a-dd321808f25e)
