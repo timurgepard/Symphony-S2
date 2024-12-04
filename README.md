@@ -10,7 +10,7 @@ Some ideas were dropped and some proven their worth were solidified:
 ⚙ No multi-agents/Without big ensemble of Critics/Model-free/Off-policy
 
 1. Temporal (Immediate) Advantage ✅ 
-2. Fading Replay Buffer ✅  (batch size 64>>576)
+2. Fading Replay Buffer ✅  (batch size 64>>768)
 3. Rectified Learnable Sine Wave Activation Function ✅
 4. Rectified Huber Symmetric and Asymmetric Loss Functions ✅
 5. Seamless Actor-Critic updates ✅ (though UTD-5)
