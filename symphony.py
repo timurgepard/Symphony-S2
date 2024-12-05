@@ -189,7 +189,7 @@ class ActorCritic(jit.ScriptModule):
         self.max_action = nn.Parameter(data=max_action, requires_grad=False)
 
         self.window = 0.333
-        self.window_step = 1/2*3e-4/(state_dim*action_dim)
+        self.window_step = 3e-4/(state_dim*action_dim)
 
         self.max_limit = nn.Parameter(data=self.window*self.max_action, requires_grad=False)
         self.lin = nn.Parameter(data=0.7*self.max_limit, requires_grad=False)
@@ -339,7 +339,7 @@ class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device, capacity):
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = 64 + min(self.length//384, 704) #in order for sample to describe population
+        self.batch_size = 64 + min(self.length//333, 704) #in order for sample to describe population
         self.random = np.random.default_rng()
         self.indices, self.indexes, self.probs = [], np.array([]), np.array([])
         self.ratio = 0.0
@@ -368,7 +368,7 @@ class ReplayBuffer:
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length) if self.length>1 else np.array([0.0])
-            self.batch_size = 64 + min(self.length//384, 704)
+            self.batch_size = 64 + min(self.length//333, 704)
             self.ratio = self.length/self.capacity
             
             
