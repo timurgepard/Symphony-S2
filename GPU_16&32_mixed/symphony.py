@@ -178,11 +178,11 @@ class ActorCritic(jit.ScriptModule):
 
         self.a = FeedForward(768+state_dim, action_dim)
 
-        self.qdim=math.sqrt(256*3)
+        self.qdim=math.sqrt(320*3)
 
-        self.qA = FeedForward(state_dim+action_dim, 256)
-        self.qB = FeedForward(state_dim+action_dim, 256)
-        self.qC = FeedForward(state_dim+action_dim, 256)
+        self.qA = FeedForward(state_dim+action_dim, 320)
+        self.qB = FeedForward(state_dim+action_dim, 320)
+        self.qC = FeedForward(state_dim+action_dim, 320)
 
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
 
@@ -317,7 +317,7 @@ class Symphony(object):
             qs = self.nets.critic(state, action)
 
             adv_next_target = q_next_target-self.feedback(q_next_target)
-            actor_loss = -self.rehae(adv_next_target, k) -self.rehse(s2_next_target, k)
+            actor_loss = -self.rehae(adv_next_target, k) #-self.rehse(s2_next_target, k)
             critic_loss = (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
 
             nets_loss = actor_loss + critic_loss
