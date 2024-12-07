@@ -155,7 +155,7 @@ class FeedForward(jit.ScriptModule):
             nn.Linear(f_in, 320),
             nn.LayerNorm(320),
             nn.Linear(320, 256),
-            ReSine(),
+            ReSine(256),
             LinearSDropout(256, 192, 0.5),
             LinearSDropout(192, f_out, 0.5)
         )
@@ -177,31 +177,23 @@ class ActorCritic(jit.ScriptModule):
         self.inC = nn.Linear(state_dim, 192)
 
         self.a = FeedForward(768+state_dim, action_dim)
+        self.a_max = nn.Linear(256, action_dim)
 
-        self.qdim=math.sqrt(320*3)
-
-        self.qA = FeedForward(state_dim+action_dim, 320)
-        self.qB = FeedForward(state_dim+action_dim, 320)
-        self.qC = FeedForward(state_dim+action_dim, 320)
+        self.qA = FeedForward(state_dim+action_dim, 256)
+        self.qB = FeedForward(state_dim+action_dim, 256)
+        self.qC = FeedForward(state_dim+action_dim, 256)
 
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
 
         self.max_action = nn.Parameter(data=max_action, requires_grad=False)
 
-        self.window = 0.333
-        self.window_step = 3e-4/(state_dim*action_dim)
+        self.max_embed = nn.Parameter(data=torch.randn(256).clip(-1.,1.), requires_grad=True)
 
-        self.max_limit = nn.Parameter(data=self.window*self.max_action, requires_grad=False)
-        self.lin = nn.Parameter(data=0.7*self.max_limit, requires_grad=False)
-        self.std = nn.Parameter(data=0.3*self.max_limit, requires_grad=False)
+        self.max_limit = nn.Parameter(data=max_action, requires_grad=False)
+        self.lin = nn.Parameter(data=0.8*self.max_limit, requires_grad=False)
+        self.std = nn.Parameter(data=0.2*self.max_limit, requires_grad=False)
 
 
-    @jit.script_method
-    def epsilon(self):
-        self.window += self.window_step
-        self.max_limit.copy_(min(self.window, 1)*self.max_action)
-        self.lin.copy_(0.7*self.max_limit)
-        self.std.copy_(0.3*self.max_limit)
 
     #========= Actor Forward Pass =========
 
@@ -219,6 +211,10 @@ class ActorCritic(jit.ScriptModule):
     
     # Do not use any decorators with online random generators (Symphony updates seed each time)
     def actor_soft(self, state):
+        self.max_limit = self.max_action*torch.sigmoid(self.a_max(self.max_embed)/self.max_action)
+        self.lin = 0.8*self.max_limit
+        self.std = 0.2*self.max_limit
+
         x = self.actor(state)
         x += (self.std*torch.randn_like(x)).clamp(-2.5*self.std, 2.5*self.std)
         return torch.where(torch.abs(x)<self.lin, x, self.squash(x))
@@ -235,8 +231,8 @@ class ActorCritic(jit.ScriptModule):
     def critic_soft(self, state, action):
         q = torch.cat(self.critic(state, action), dim=-1)
         q_mean = torch.mean(q, dim=-1, keepdim=True)
-        s = (q_mean-q)/self.qdim
-        return q_mean, s*torch.tanh(s)
+        q_min = torch.min(q, dim=-1, keepdim=True).values
+        return (q_mean+q_min)/2
 
 
 
@@ -252,7 +248,7 @@ class Symphony(object):
         self.nets_target.load_state_dict(self.nets.state_dict())
 
 
-        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=3e-4)
+        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=7e-5)
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
@@ -277,7 +273,7 @@ class Symphony(object):
 
     def select_action(self, state, mean=False):
         state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
-        with torch.no_grad(): action = self.nets_target.actor(state) if mean else self.nets_target.actor_soft(state)
+        with torch.no_grad(): action = self.nets.actor(state) if mean else self.nets.actor_soft(state)
         return action.cpu().data.numpy().flatten()
 
 
@@ -308,16 +304,15 @@ class Symphony(object):
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
         k = 0.5*self.replay_buffer.ratio
-        self.nets.epsilon()
 
         with torch.amp.autocast("cuda", dtype=torch.bfloat16):
             next_action = self.nets.actor_soft(next_state)
-            q_next_target, s2_next_target  = self.nets_target.critic_soft(next_state, next_action)
+            q_next_target  = self.nets_target.critic_soft(next_state, next_action)
             q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
             qs = self.nets.critic(state, action)
 
             adv_next_target = q_next_target-self.feedback(q_next_target)
-            actor_loss = -self.rehae(adv_next_target, k) #-self.rehse(s2_next_target, k)
+            actor_loss = -self.rehae(adv_next_target, k)
             critic_loss = (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
 
             nets_loss = actor_loss + critic_loss
@@ -333,7 +328,7 @@ class Symphony(object):
         
 
         with torch.no_grad():
-            for target_param, param in zip(self.nets_target.parameters(), self.nets.parameters()):
+            for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
 
        
