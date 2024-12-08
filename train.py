@@ -49,7 +49,7 @@ elif option == 0:
     env_test = gym.make('MountainCarContinuous-v0')
 
 elif option == 1:
-    env = gym.make('HalfCheetah-v4', render_mode="human")
+    env = gym.make('HalfCheetah-v4')
     env_test = gym.make('HalfCheetah-v4')
 
 elif option == 2:
@@ -67,7 +67,7 @@ elif option == 4:
     env_test = gym.make('HumanoidStandup-v4')
 
 elif option == 5:
-    env = gym.make('Ant-v4')
+    env = gym.make('Ant-v4', render_mode="human")
     env_test = gym.make('Ant-v4')
 
 
@@ -193,7 +193,7 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
         validate_return = np.mean(episode_return[-100:])
         print(f"trial {test_episode+1}:, Rtrn = {episode_return[test_episode]:.2f}, Average 100 = {validate_return:.2f}, steps: {steps}")
 
-    if save_log: log_file.write(str(current_step) + ": " + str(round(validate_return.item(), 2)) + "\n")
+    if save_log: log_file.write(str(current_step) + " : " + str(round(validate_return.item(), 2)) + "\n")
 
 
 #==============================================================================================
@@ -210,8 +210,6 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        algo.nets.window = dict['window']
-        algo.nets_target.window = dict['window_target']
         #hard_recovery(algo, dict['buffer'], 200000+20000) # comment the previous line and chose a memory size to recover from old buffer
         #hard_recovery_to_bfloat16(algo, dict['buffer'], 158750+20000) # comment the previous line and chose a memory size to recover from old buffer
         episode_rewards_all = dict['episode_rewards_all']
@@ -313,7 +311,7 @@ for i in range(start_episode, num_episodes):
             torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
             torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
             with open('data'+ part, 'wb') as file:
-                pickle.dump({'buffer': algo.replay_buffer, 'window': algo.nets.window, 'window_target': algo.nets_target.window, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
+                pickle.dump({'buffer': algo.replay_buffer, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
             
 
  
@@ -336,7 +334,7 @@ for i in range(start_episode, num_episodes):
 
     print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {episode_steps} | total_steps = {total_steps}")
 
-    log_file.write_opt(str(i) + ": " + str(round(episode_rewards_all[-1], 2)) + "\n")
+    log_file.write_opt(str(i) + " : " + str(round(episode_rewards_all[-1], 2)) + " : step : " + str(total_steps) + "\n")
 
 
  
