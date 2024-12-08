@@ -217,7 +217,7 @@ class ActorCritic(jit.ScriptModule):
         self.std = 0.2*self.max_limit
 
         x = self.actor(state)
-        x += (self.std*torch.randn_like(x)).clamp(-2.5*self.std, 2.5*self.std)
+        x += self.std*torch.randn_like(x).clamp(-1., 1.)
         return torch.where(torch.abs(x)<self.lin, x, self.squash(x))
 
     #========= Critic Forward Pass =========
@@ -248,7 +248,7 @@ class Symphony(object):
         self.nets_target.load_state_dict(self.nets.state_dict())
 
 
-        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=1e-4)
+        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=3e-4)
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
