@@ -187,7 +187,8 @@ class ActorCritic(jit.ScriptModule):
 
         self.max_action = nn.Parameter(data=max_action, requires_grad=False)
 
-        self.max_embed = nn.Parameter(data=torch.randn(256).clip(-1.,1.), requires_grad=True)
+        std_embed = 1/math.sqrt(256)
+        self.max_embed = nn.Parameter(data=2*std_embed*torch.rand(256)-std_embed, requires_grad=True)
 
         self.max_limit = nn.Parameter(data=max_action, requires_grad=False)
         self.lin = nn.Parameter(data=0.8*self.max_limit, requires_grad=False)
@@ -236,7 +237,6 @@ class ActorCritic(jit.ScriptModule):
 
 
 
-
 # Define the algorithm
 class Symphony(object):
     def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.005, capacity=300000):
@@ -248,7 +248,7 @@ class Symphony(object):
         self.nets_target.load_state_dict(self.nets.state_dict())
 
 
-        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=7e-5)
+        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=1e-4)
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
@@ -304,14 +304,13 @@ class Symphony(object):
         self.nets_optimizer.zero_grad(set_to_none=True)
         k = 0.5*self.replay_buffer.ratio
 
-
         next_action = self.nets.actor_soft(next_state)
-        q_next_target  = self.nets_target.critic_soft(next_state, next_action)
+        q_next_target = self.nets_target.critic_soft(next_state, next_action)
         q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
         qs = self.nets.critic(state, action)
 
         adv_next_target = q_next_target-self.feedback(q_next_target)
-        actor_loss = -self.rehae(adv_next_target, k)
+        actor_loss = -0.9 * self.rehae(adv_next_target, k)
         critic_loss = (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
 
         nets_loss = actor_loss + critic_loss
