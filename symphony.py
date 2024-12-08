@@ -217,7 +217,7 @@ class ActorCritic(jit.ScriptModule):
         self.std = 0.2*self.max_limit
 
         x = self.actor(state)
-        x += self.std*torch.randn_like(x).clamp(-1., 1.)
+        x += self.std*torch.randn_like(x).clamp(-2.5., 2.5.)
         return torch.where(torch.abs(x)<self.lin, x, self.squash(x))
 
     #========= Critic Forward Pass =========
