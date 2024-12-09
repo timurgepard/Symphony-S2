@@ -248,7 +248,7 @@ class Symphony(object):
         self.nets_target.load_state_dict(self.nets.state_dict())
 
 
-        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=3e-4)
+        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=1.5e-4)
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
