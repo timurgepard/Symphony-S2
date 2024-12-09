@@ -23,7 +23,7 @@ print(device)
 
 #global parameters
 # environment type.
-option = 3
+option = 2
 
 
 explore_time = 5000
@@ -67,7 +67,7 @@ elif option == 4:
     env_test = gym.make('HumanoidStandup-v4')
 
 elif option == 5:
-    env = gym.make('Ant-v4', render_mode="human")
+    env = gym.make('Ant-v4')
     env_test = gym.make('Ant-v4')
 
 
