@@ -191,8 +191,8 @@ class ActorCritic(jit.ScriptModule):
         self.max_embed = nn.Parameter(data=2*std_embed*torch.rand(256)-std_embed, requires_grad=True)
 
         self.max_limit = nn.Parameter(data=max_action, requires_grad=False)
-        self.lin = nn.Parameter(data=0.8*self.max_limit, requires_grad=False)
-        self.std = nn.Parameter(data=0.2*self.max_limit, requires_grad=False)
+        self.lin = nn.Parameter(data=0.7*self.max_limit, requires_grad=False)
+        self.cur = nn.Parameter(data=0.3*self.max_limit, requires_grad=False)
 
 
 
@@ -208,16 +208,16 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def squash(self, x):
         shift = torch.sign(x)*self.lin
-        return self.std * torch.tanh((x-shift)/self.std) + shift
+        return self.cur * torch.tanh((x-shift)/self.cur) + shift
     
     # Do not use any decorators with online random generators (Symphony updates seed each time)
     def actor_soft(self, state):
         self.max_limit = self.max_action*torch.sigmoid(self.a_max(self.max_embed)/self.max_action)
-        self.lin = 0.8*self.max_limit
-        self.std = 0.2*self.max_limit
+        self.lin = 0.7*self.max_limit
+        self.cur = 0.3*self.max_limit
 
         x = self.actor(state)
-        x += self.std*torch.randn_like(x).clamp(-2.5, 2.5)
+        x += 0.2*torch.randn_like(x).clamp(-2.5, 2.5)
         return torch.where(torch.abs(x)<self.lin, x, self.squash(x))
 
     #========= Critic Forward Pass =========
@@ -387,6 +387,7 @@ class ReplayBuffer:
     # Do not use any decorators with random generators (Symphony updates seed each time)
     def sample(self):
         indices = self.random.choice(self.indexes, p=self.probs, size=self.batch_size)
+
 
         return (
             self.states[indices],
