@@ -15,7 +15,7 @@ Some ideas were dropped and some proven their worth were solidified:
 4. Rectified Huber Symmetric and Asymmetric Loss Functions ✅
 5. Seamless Actor-Critic updates ✅ (though UTD-5)
 6. Silent Dropouts ✅
-7. Q variance improvement ✅
+7. Optional: Q variance improvement ✅
 
 modules were transferred from Pytorch nn.Module to Pytorch jit.ScriptModule.
 
