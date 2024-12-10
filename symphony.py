@@ -239,7 +239,8 @@ class ActorCritic(jit.ScriptModule):
         q = torch.cat(self.critic(state, action), dim=-1)
         q_mean = torch.mean(q, dim=-1, keepdim=True)
         q_min = torch.min(q, dim=-1, keepdim=True).values
-        return (q_mean+q_min)/2
+        s = (q-q_mean)/math.sqrt(q.shape[-1])
+        return (q_mean+q_min)/2, s*torch.tanh(s)
 
 
 
@@ -311,12 +312,12 @@ class Symphony(object):
         k = 1/2*self.replay_buffer.ratio
 
         next_action = self.nets.actor_soft(next_state)
-        q_next_target = self.nets_target.critic_soft(next_state, next_action)
+        q_next_target, s2_next_target = self.nets_target.critic_soft(next_state, next_action)
         q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
         qs = self.nets.critic(state, action)
 
         adv_next_target = q_next_target-self.feedback(q_next_target)
-        actor_loss = -0.9 * self.rehae(adv_next_target, k)
+        actor_loss = -0.9 * self.rehae(adv_next_target, k) -0.1 * self.rehse(s2_next_target, k)
         critic_loss = 1/3 * (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
 
         nets_loss = actor_loss + critic_loss
