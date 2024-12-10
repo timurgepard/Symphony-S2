@@ -132,7 +132,8 @@ class LinearSDropout(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        self.s = nn.Parameter(data=2.0*torch.rand(hidden_dim)-1.0, requires_grad=True)
+        std = 1/math.sqrt(hidden_dim)
+        self.s = nn.Parameter(data=2.0*std*torch.rand(hidden_dim)-std, requires_grad=True)
 
     @jit.script_method
     def forward(self, x):
@@ -177,7 +178,8 @@ class ActorCritic(jit.ScriptModule):
         self.inC = nn.Linear(state_dim, 192)
 
         self.a = FeedForward(768+state_dim, action_dim)
-        self.a_max = nn.Linear(256, action_dim)
+        self.a_opt = LinearSDropout(768, 2*action_dim)
+
 
         self.qA = FeedForward(state_dim+action_dim, 256)
         self.qB = FeedForward(state_dim+action_dim, 256)
@@ -185,11 +187,12 @@ class ActorCritic(jit.ScriptModule):
 
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
 
+        
+
+        std_embed = 1/math.sqrt(768)
+        self.opt_embed = nn.Parameter(data=2*std_embed*torch.rand(768)-std_embed, requires_grad=True)
+
         self.max_action = nn.Parameter(data=max_action, requires_grad=False)
-
-        std_embed = 1/math.sqrt(256)
-        self.max_embed = nn.Parameter(data=2*std_embed*torch.rand(256)-std_embed, requires_grad=True)
-
         self.max_limit = nn.Parameter(data=max_action, requires_grad=False)
         self.lin = nn.Parameter(data=0.7*self.max_limit, requires_grad=False)
         self.cur = nn.Parameter(data=0.3*self.max_limit, requires_grad=False)
@@ -212,12 +215,14 @@ class ActorCritic(jit.ScriptModule):
     
     # Do not use any decorators with online random generators (Symphony updates seed each time)
     def actor_soft(self, state):
-        self.max_limit = self.max_action*torch.sigmoid(self.a_max(self.max_embed)/self.max_action)
+        x = self.max_action*torch.sigmoid(self.a_opt(self.opt_embed).reshape(2, -1)/self.max_action)
+        self.max_limit = x[0]
+        self.std_limit = x[1]
         self.lin = 0.7*self.max_limit
         self.cur = 0.3*self.max_limit
 
         x = self.actor(state)
-        x += 2/3*self.cur*torch.randn_like(x).clamp(-2.5, 2.5)
+        x += self.std_limit*torch.randn_like(x).clamp(-2.5, 2.5)
         return torch.where(torch.abs(x)<self.lin, x, self.squash(x))
 
     #========= Critic Forward Pass =========
@@ -227,13 +232,15 @@ class ActorCritic(jit.ScriptModule):
         x = torch.cat([state, action], -1)
         return [qnet(x) for qnet in self.qnets]
 
+
     # take 3 distributions and concatenate them
     @jit.script_method
     def critic_soft(self, state, action):
         q = torch.cat(self.critic(state, action), dim=-1)
         q_mean = torch.mean(q, dim=-1, keepdim=True)
         q_min = torch.min(q, dim=-1, keepdim=True).values
-        return (q_mean+q_min)/2
+        s = (q-q_mean)/math.sqrt(q.shape[-1])
+        return (q_mean+q_min)/2, s*torch.tanh(s)
 
 
 
@@ -248,7 +255,7 @@ class Symphony(object):
         self.nets_target.load_state_dict(self.nets.state_dict())
 
 
-        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=1.5e-4)
+        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=3e-4)
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
@@ -302,16 +309,16 @@ class Symphony(object):
 
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
-        k = 0.5*self.replay_buffer.ratio
+        k = 1/2*self.replay_buffer.ratio
 
         next_action = self.nets.actor_soft(next_state)
-        q_next_target = self.nets_target.critic_soft(next_state, next_action)
+        q_next_target, s2_next_target = self.nets_target.critic_soft(next_state, next_action)
         q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach()
         qs = self.nets.critic(state, action)
 
         adv_next_target = q_next_target-self.feedback(q_next_target)
-        actor_loss = -0.9 * self.rehae(adv_next_target, k)
-        critic_loss = (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
+        actor_loss = -(0.9 * self.rehae(adv_next_target, k) + 0.1 * self.rehse(s2_next_target, k))
+        critic_loss = 1/3 * (self.rehse(q-qs[0], k) + self.rehse(q-qs[1], k) + self.rehse(q-qs[2], k))
 
         nets_loss = actor_loss + critic_loss
 
