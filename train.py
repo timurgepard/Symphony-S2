@@ -23,7 +23,7 @@ print(device)
 
 #global parameters
 # environment type.
-option = 5
+option = 3
 
 
 explore_time = 5000
