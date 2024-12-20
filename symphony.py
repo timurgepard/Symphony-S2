@@ -181,7 +181,7 @@ class ActorCritic(jit.ScriptModule):
         hidden_dim = 256*3
 
         self.a = FeedForward(hidden_dim, action_dim)
-        self.a_opt = LinearSDropout(hidden_dim, action_dim, 0.5)
+        self.a_opt = FeedForward(hidden_dim, action_dim)
 
 
         self.qA = FeedForward(state_dim+action_dim, 256)
@@ -205,10 +205,6 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor(self, state):
-        self.max_limit = self.max_action*torch.sigmoid(self.a_opt(self.opt_embed)/self.max_action)
-        self.lin = 0.7*self.max_limit
-        self.cur = 0.3*self.max_limit
-
         state = torch.cat([self.inA(state), self.inB(state), self.inC(state)], dim=-1)
         x = self.a(state)
         return self.max_limit*torch.tanh(x/self.max_limit)
@@ -221,8 +217,12 @@ class ActorCritic(jit.ScriptModule):
         return torch.sign(x) * torch.min(x_, x_squashed)
 
 
-    # Do not use any decorators with online random generators (Symphony updates seed each time)
+    @jit.script_method
     def actor_soft(self, state):
+        self.max_limit = self.max_action*torch.sigmoid(self.a_opt(self.opt_embed)/self.max_action)
+        self.lin = 0.7*self.max_limit
+        self.cur = 0.3*self.max_limit
+
         x = self.actor(state)
         x += 2/3 * self.cur*torch.randn_like(x).clamp(-2.5, 2.5)
         return self.squash(x)
@@ -318,7 +318,7 @@ class Symphony(object):
         k = 1/2 * self.replay_buffer.ratio
 
         next_action = self.nets.actor_soft(next_state)
-        q_next_target = self.nets_target.critic_soft(next_state, next_action)
+        q_next_target = self.nets_target.critic(next_state, next_action)
         q = 0.01 * reward + (1-done) * 0.99 * q_next_target.detach() 
         qs = self.nets.critic(state, action)
 
