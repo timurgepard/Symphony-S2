@@ -53,7 +53,7 @@ elif option == 1:
     env_test = gym.make('HalfCheetah-v4')
 
 elif option == 2:
-    env = gym.make('Walker2d-v4')
+    env = gym.make('Walker2d-v4', render_mode="human")
     env_test = gym.make('Walker2d-v4')
 
 elif option == 3:
@@ -67,12 +67,12 @@ elif option == 4:
     env_test = gym.make('HumanoidStandup-v4')
 
 elif option == 5:
-    env = gym.make('Ant-v4')
+    env = gym.make('Ant-v4', render_mode="human")
     env_test = gym.make('Ant-v4')
 
 
 elif option == 6:
-    env = gym.make('BipedalWalker-v3', render_mode="human")
+    env = gym.make('BipedalWalker-v3')
     env_test = gym.make('BipedalWalker-v3')
 
 elif option == 7:
@@ -307,7 +307,7 @@ for i in range(start_episode, num_episodes):
         if (total_steps>=1250 and total_steps%1250==0):
             part = ""
             #part = "_"+str(total_steps/1000) if total_steps%300000==0 else ""
-            testing(env_test, limit_step=limit_eval, test_episodes=25, current_step=total_steps, save_log=True)
+            testing(env_test, limit_step=limit_eval, test_episodes=100, current_step=total_steps, save_log=True)
             torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
             torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
             with open('data'+ part, 'wb') as file:
