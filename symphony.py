@@ -325,7 +325,7 @@ class ReplayBuffer:
 
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = 512
+        self.batch_size = 768
         self.random = np.random.default_rng()
         self.indexes = np.arange(0, capacity, 1)
         self.probs = fade(self.indexes/capacity)
