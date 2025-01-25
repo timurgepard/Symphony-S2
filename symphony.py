@@ -105,17 +105,6 @@ class ReHAE(jit.ScriptModule):
         return e.mean()
 
 
-#Regularization
-class ArTanh_(jit.ScriptModule):
-    def __init__(self):
-        super(ArTanh_, self).__init__()
-
-    @jit.script_method
-    def forward(self, x, k:float):
-        x = x + 1e-6
-        reg = 0.01 * k * torch.log((1-x)/x)
-        return reg.mean()
-
 
 
 
@@ -236,14 +225,8 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic_soft(self, state, action):
         q = self.critic(state, action)
-        q = q.mean(dim=-1, keepdim=True)
-        return q, q.detach()
-        """
-        q_min = q.min(dim=-1, keepdim=True)[0]
-        q_mean = q.mean(dim=-1, keepdim=True)
-        q_soft = (q_min+q_mean)/2
+        q_soft =  (q.min(dim=-1, keepdim=True)[0] + q.mean(dim=-1, keepdim=True))/2
         return q_soft, q_soft.detach()
-        """
         
 
 
@@ -267,8 +250,6 @@ class Symphony(object):
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
-        self.reg = ArTanh_()
-
 
         self.max_action = max_action
       
@@ -293,42 +274,40 @@ class Symphony(object):
         return action.cpu().data.numpy().flatten()
 
 
-    def train(self, tr_per_step=5):
+    def train(self, total_steps):
         # decreases dependence on random seeds:
         r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
         torch.manual_seed(r1)
         np.random.seed(r2)
         random.seed(r3)
 
-        for _ in range(tr_per_step): self.update()
+        for _ in range(4): self.update(total_steps)
 
 
 
-    def update(self):
+    def update(self, total_steps):
 
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
-        k = 1/2
+        k = 0.5# * min(total_steps/self.replay_buffer.capacity, 1.0)
 
 
         with torch.no_grad():
             for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
 
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            next_action, next_max_action = self.nets.actor_soft(next_state)
-            q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
-            q = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
-            qs = self.nets.critic(state, action)
+        #with torch.cuda.amp.autocast(dtype=torch.float32):
+        next_action, next_max_action = self.nets.actor_soft(next_state)
+        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
+        q = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
+        qs = self.nets.critic(state, action)
 
 
-            q_next_ema = self.tau_ * self.q_next_ema + self.tau * q_next_target_value
-            nets_loss = -self.rehae(q_next_target-q_next_ema, k) + self.rehse(q-qs, k) + self.reg(next_max_action, k)
-        
-        #nets_loss.backward()
-        #self.nets_optimizer.step()
-        self.scaler.scale(nets_loss).backward()
-        self.scaler.step(self.nets_optimizer)    
+        q_next_ema = self.tau_ * self.q_next_ema + self.tau * q_next_target_value
+        nets_loss = -self.rehae(q_next_target-q_next_ema, k) + self.rehse(q-qs, k) #+ self.reg(next_max_action, k)
+
+        nets_loss.backward()
+        self.nets_optimizer.step()
         self.q_next_ema = q_next_ema.mean()
 
 
@@ -343,21 +322,21 @@ class ReplayBuffer:
 
         #Normalized index conversion into fading probabilities
         def fade(norm_index):
-            weights = np.tanh(10*norm_index**2.7) # linear / -> non-linear _/‾
+            weights = np.tanh(7*norm_index**3) # linear / -> non-linear _/‾
             return weights/np.sum(weights) #probabilities
 
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = 512
+        self.batch_size = 768
         self.random = np.random.default_rng()
         self.indexes = np.arange(0, capacity, 1)
         self.probs = fade(self.indexes/capacity)
 
-        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.bfloat16, device=device)
-        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.bfloat16, device=device)
-        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.bfloat16, device=device)
-        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.bfloat16, device=device)
-        self.dones = torch.zeros((self.capacity, 1), dtype=torch.bfloat16, device=device)
+        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
+        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
+        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
+        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
+        self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
 
 
 
@@ -369,11 +348,11 @@ class ReplayBuffer:
             
         idx = self.length-1
         
-        self.states[idx,:] = torch.tensor(state, dtype=torch.bfloat16, device=self.device)
-        self.actions[idx,:] = torch.tensor(action, dtype=torch.bfloat16, device=self.device)
-        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.bfloat16, device=self.device)
-        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.bfloat16, device=self.device)
-        self.dones[idx,:] = torch.tensor([done], dtype=torch.bfloat16, device=self.device)
+        self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
+        self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
+        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
+        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
+        self.dones[idx,:] = torch.tensor([done], dtype=torch.float32, device=self.device)
 
 
         if self.length>=self.capacity:
