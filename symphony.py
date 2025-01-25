@@ -243,7 +243,7 @@ class Symphony(object):
 
         self.learning_rate = 3e-4
         
-        self.nets_optimizer = optim.Adam(self.nets.parameters(), lr=self.learning_rate)
+        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=self.learning_rate)
           
 
         self.rehse = ReHSE()
@@ -320,12 +320,12 @@ class ReplayBuffer:
 
         #Normalized index conversion into fading probabilities
         def fade(norm_index):
-            weights = np.tanh(7*norm_index**3) # linear / -> non-linear _/‾
+            weights = np.tanh(4*norm_index**3) # linear / -> non-linear _/‾
             return weights/np.sum(weights) #probabilities
 
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = 768
+        self.batch_size = 512
         self.random = np.random.default_rng()
         self.indexes = np.arange(0, capacity, 1)
         self.probs = fade(self.indexes/capacity)
