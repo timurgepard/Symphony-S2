@@ -23,11 +23,11 @@ print(device)
 
 #global parameters
 # environment type.
-option = 3
+option = 2
 
 
 explore_time = 5000
-tr_per_step = 5 # actor-critic updates per frame/step
+tr_per_step = 4 # actor-critic updates per frame/step
 limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
@@ -35,7 +35,7 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning, average_steps = [], [], [], False, 0
 
 
-capacity = 384000
+capacity = 150000
 tau = 0.005
 
 
@@ -72,7 +72,7 @@ elif option == 5:
 
 
 elif option == 6:
-    env = gym.make('BipedalWalker-v3')
+    env = gym.make('BipedalWalker-v3', render_mode="human")
     env_test = gym.make('BipedalWalker-v3')
 
 elif option == 7:
@@ -154,8 +154,7 @@ def explore_copy(rb, e_time, times):
         rb.rewards[start_time_c:end_time_c] = rb.rewards[start_time:end_time]
         rb.next_states[start_time_c:end_time_c] = rb.next_states[start_time:end_time]
         rb.dones[start_time_c:end_time_c] = rb.dones[start_time:end_time]
-        rb.indices[start_time_c:end_time_c] = rb.indices[start_time:end_time]
-    rb.length = len(rb.indices)
+    rb.length += e_time*times
 
 #==============================================================================================
 #==============================================================================================
@@ -212,6 +211,7 @@ try:
         algo.replay_buffer = dict['buffer']
         #hard_recovery(algo, dict['buffer'], 200000+20000) # comment the previous line and chose a memory size to recover from old buffer
         #hard_recovery_to_bfloat16(algo, dict['buffer'], 158750+20000) # comment the previous line and chose a memory size to recover from old buffer
+        algo.q_next_ema = dict['q_next_ema']
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
         total_steps = dict['total_steps']
@@ -244,10 +244,10 @@ except:
 #==============================================================================================
 
 
+
 if not Q_learning:
     log_file.clean()
     total_steps = 0
-
 
     while not Q_learning:
         rewards = []
@@ -264,15 +264,16 @@ if not Q_learning:
             if done and abs(reward) == 100.0: reward /= 50.0 
             algo.replay_buffer.add(state, action, reward, next_state, done)
             state = next_state
-            if done: break
+            if Q_learning or done: break
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
 
     
-
-    total_steps = 0
+    #total_steps = 0
     print("copying explore data")
-    explore_copy(algo.replay_buffer, explore_time, 3)
+    explore_copy(algo.replay_buffer, explore_time, 29)
+
+
     
 
 
@@ -307,11 +308,11 @@ for i in range(start_episode, num_episodes):
         if (total_steps>=1250 and total_steps%1250==0):
             part = ""
             #part = "_"+str(total_steps/1000) if total_steps%300000==0 else ""
-            testing(env_test, limit_step=limit_eval, test_episodes=100, current_step=total_steps, save_log=True)
+            testing(env_test, limit_step=limit_eval, test_episodes=50, current_step=total_steps, save_log=True)
             torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
             torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
             with open('data'+ part, 'wb') as file:
-                pickle.dump({'buffer': algo.replay_buffer, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
+                pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
             
 
  
@@ -320,7 +321,7 @@ for i in range(start_episode, num_episodes):
         rewards.append(reward)
         if done and abs(reward) == 100.0: reward /= 50.0 
         algo.replay_buffer.add(state, action, reward, next_state, done)
-        algo.train(tr_per_step)
+        algo.train(total_steps)
         state = next_state
         if done: break
 
