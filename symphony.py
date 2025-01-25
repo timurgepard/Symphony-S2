@@ -196,7 +196,7 @@ class ActorCritic(jit.ScriptModule):
     def actor(self, state):
         x = self.a(state).clamp(-2.5, 2.5).reshape(-1,2,self.action_dim)
         x_max = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
-        return x_max*torch.tanh(x[:,1]/x_max), x_max
+        return x_max*torch.tanh(x[:,1]/x_max)
 
 
     @jit.script_method
@@ -207,9 +207,9 @@ class ActorCritic(jit.ScriptModule):
 
     # Symphony updates seeds each step, it is better not to use a decorator here
     def actor_soft(self, state):
-        x, x_max = self.actor(state)
+        x = self.actor(state)
         x += 0.2 * self.a_max * torch.randn_like(x).clamp(-2.5, 2.5)
-        return self.squash(x), x_max
+        return self.squash(x)
 
 
     #========= Critic Forward Pass =========
@@ -244,9 +244,7 @@ class Symphony(object):
         self.learning_rate = 3e-4
         
         self.nets_optimizer = optim.Adam(self.nets.parameters(), lr=self.learning_rate)
-        #for param in self.nets.parameters():
-            #if param.requires_grad: param.register_hook(lambda grad: torch.clamp(grad, -lr_rate, lr_rate))
-            
+          
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
@@ -270,26 +268,26 @@ class Symphony(object):
 
     def select_action(self, state, mean=False):
         state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
-        with torch.no_grad(): action = self.nets.actor(state)[0] if mean else self.nets.actor_soft(state)[0]
+        with torch.no_grad(): action = self.nets.actor(state) if mean else self.nets.actor_soft(state)
         return action.cpu().data.numpy().flatten()
 
 
-    def train(self, total_steps):
+    def train(self):
         # decreases dependence on random seeds:
         r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
         torch.manual_seed(r1)
         np.random.seed(r2)
         random.seed(r3)
 
-        for _ in range(4): self.update(total_steps)
+        for _ in range(4): self.update()
 
 
 
-    def update(self, total_steps):
+    def update(self):
 
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
-        k = 0.5# * min(total_steps/self.replay_buffer.capacity, 1.0)
+        k = 0.5
 
 
         with torch.no_grad():
@@ -297,14 +295,14 @@ class Symphony(object):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
 
         #with torch.cuda.amp.autocast(dtype=torch.float32):
-        next_action, next_max_action = self.nets.actor_soft(next_state)
+        next_action = self.nets.actor_soft(next_state)
         q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
         q = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
         qs = self.nets.critic(state, action)
 
 
         q_next_ema = self.tau_ * self.q_next_ema + self.tau * q_next_target_value
-        nets_loss = -self.rehae(q_next_target-q_next_ema, k) + self.rehse(q-qs, k) #+ self.reg(next_max_action, k)
+        nets_loss = -self.rehae(q_next_target-q_next_ema, k) + self.rehse(q-qs, k)
 
         nets_loss.backward()
         self.nets_optimizer.step()
