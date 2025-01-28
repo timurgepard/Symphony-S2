@@ -105,15 +105,6 @@ class ReHAE(jit.ScriptModule):
         return e.mean()
 
 
-#Regularization
-class NoName(jit.ScriptModule):
-    def __init__(self):
-        super(NoName, self).__init__()
-
-    @jit.script_method
-    def forward(self, x):
-        reg = 1e-3 * torch.log(x/(1-x))
-        return reg.mean()
 
 
 
@@ -238,8 +229,7 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic_soft(self, state, action, std):
         q = self.critic(state, action)
-        q_soft =  (q.min(dim=-1, keepdim=True)[0] + q.mean(dim=-1, keepdim=True))/2
-        q_soft = q_soft * (1 - self.reg(std))
+        q_soft = 0.5 * (q.min(dim=-1, keepdim=True)[0] + q.mean(dim=-1, keepdim=True)) * (1 - self.reg(std))
         return q_soft, q_soft.detach()
         
 
@@ -262,7 +252,6 @@ class Symphony(object):
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
-        self.reg = NoName()
 
         self.max_action = max_action
       
@@ -335,7 +324,7 @@ class ReplayBuffer:
 
         #Normalized index conversion into fading probabilities
         def fade(norm_index):
-            weights = np.tanh(10*norm_index**3) # linear / -> non-linear _/‾
+            weights = np.tanh(30*norm_index**3) # linear / -> non-linear _/‾
             return weights/np.sum(weights) #probabilities
 
 
