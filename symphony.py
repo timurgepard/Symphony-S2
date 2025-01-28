@@ -111,9 +111,8 @@ class NoName(jit.ScriptModule):
         super(NoName, self).__init__()
 
     @jit.script_method
-    def forward(self, x, k:float):
-        x = 1/(x + 1e-6)
-        reg = 1e-3 * k * torch.log(x) * torch.log(x-1)
+    def forward(self, x):
+        reg = 1e-3 * torch.log(x/(1-x))
         return reg.mean()
 
 
@@ -219,7 +218,7 @@ class ActorCritic(jit.ScriptModule):
     # Symphony updates seeds each step, it is better not to use a decorator here
     def actor_soft(self, state):
         x, x_max = self.actor(state)
-        x += 0.2 * self.a_max * torch.randn_like(x).clamp(-2.5, 2.5)
+        x = x + 0.2 * self.a_max  * torch.randn_like(x).clamp(-2.5, 2.5)
         return self.squash(x), x_max
 
 
@@ -230,13 +229,17 @@ class ActorCritic(jit.ScriptModule):
         x = torch.cat([state, action], -1)
         return torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
 
-
+    @jit.script_method
+    def reg(self, x):
+        reg = 0.0025 * torch.log(x/(1-x))**2
+        return reg.mean(dim=-1, keepdim=True)
 
     # take average in between min and mean
     @jit.script_method
-    def critic_soft(self, state, action):
+    def critic_soft(self, state, action, std):
         q = self.critic(state, action)
         q_soft =  (q.min(dim=-1, keepdim=True)[0] + q.mean(dim=-1, keepdim=True))/2
+        q_soft = q_soft * (1 - self.reg(std))
         return q_soft, q_soft.detach()
         
 
@@ -252,8 +255,8 @@ class Symphony(object):
         self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action,).to(device)
         self.nets_target.load_state_dict(self.nets.state_dict())
 
-        self.learning_rate = 3e-5
-        
+        self.learning_rate = 3e-4
+
         self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=self.learning_rate)
           
 
@@ -291,7 +294,7 @@ class Symphony(object):
         np.random.seed(r2)
         random.seed(r3)
 
-        for _ in range(4): self.update()
+        for _ in range(5): self.update()
 
 
 
@@ -299,7 +302,7 @@ class Symphony(object):
 
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
-        k = 0.5
+        k = 1/2
 
 
         with torch.no_grad():
@@ -308,13 +311,13 @@ class Symphony(object):
 
         #with torch.cuda.amp.autocast(dtype=torch.float32):
         next_action, next_max_action = self.nets.actor_soft(next_state)
-        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
+        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_max_action)
         q = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
         qs = self.nets.critic(state, action)
 
 
         q_next_ema = self.tau_ * self.q_next_ema + self.tau * q_next_target_value
-        nets_loss = -self.rehae(q_next_target-q_next_ema, k) + self.rehse(q-qs, k) #+ self.reg(next_max_action, k)
+        nets_loss = -self.rehae(q_next_target-q_next_ema, k) + self.rehse(q-qs, k) 
 
         nets_loss.backward()
         self.nets_optimizer.step()
@@ -337,7 +340,7 @@ class ReplayBuffer:
 
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = 256
+        self.batch_size = 768
         self.random = np.random.default_rng()
         self.indexes = np.arange(0, capacity, 1)
         self.probs = fade(self.indexes/capacity)
