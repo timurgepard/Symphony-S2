@@ -237,9 +237,9 @@ class ActorCritic(jit.ScriptModule):
 
 # Define the algorithm
 class Symphony(object):
-    def __init__(self, state_dim, action_dim, device, max_action=1.0, tau=0.005, capacity=300000):
+    def __init__(self, state_dim, action_dim, device, max_action=1.0):
 
-        self.replay_buffer = ReplayBuffer(state_dim, action_dim, device, capacity)
+        self.replay_buffer = ReplayBuffer(state_dim, action_dim, device)
 
         self.nets = ActorCritic(state_dim, action_dim, max_action=max_action,).to(device)
         self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action,).to(device)
@@ -256,8 +256,8 @@ class Symphony(object):
         self.max_action = max_action
       
 
-        self.tau = tau
-        self.tau_ = 1.0 - tau
+        self.tau = 0.003
+        self.tau_ = 1.0 - self.tau
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.device = device
@@ -320,7 +320,7 @@ class Symphony(object):
 
 
 class ReplayBuffer:
-    def __init__(self, state_dim, action_dim, device, capacity):
+    def __init__(self, state_dim, action_dim, device):
 
         #Normalized index conversion into fading probabilities
         def fade(norm_index):
@@ -328,11 +328,11 @@ class ReplayBuffer:
             return weights/np.sum(weights) #probabilities
 
 
-        self.capacity, self.length, self.device = capacity, 0, device
+        self.capacity, self.length, self.device = 100000, 0, device
         self.batch_size = 512
         self.random = np.random.default_rng()
-        self.indexes = np.arange(0, capacity, 1)
-        self.probs = fade(self.indexes/capacity)
+        self.indexes = np.arange(0, self.capacity, 1)
+        self.probs = fade(self.indexes/self.capacity)
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
