@@ -27,16 +27,12 @@ option = 2
 
 
 explore_time = 5000
-tr_per_step = 4 # actor-critic updates per frame/step
 limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
 start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning, average_steps = [], [], [], False, 0
 
-
-capacity = 100000
-tau = 0.003
 
 
 
@@ -114,7 +110,7 @@ action_dim= env.action_space.shape[0]
 print('action space high', env.action_space.high)
 max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else 1.0
 
-algo = Symphony(state_dim, action_dim, device, max_action, tau, capacity)
+algo = Symphony(state_dim, action_dim, device, max_action)
 
 
 
