@@ -35,7 +35,7 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning, average_steps = [], [], [], False, 0
 
 
-capacity = 75000
+capacity = 100000
 tau = 0.003
 
 
@@ -278,7 +278,7 @@ if not Q_learning:
     
     #total_steps = 0
     print("copying explore data")
-    explore_copy(algo.replay_buffer, explore_time, 14)
+    explore_copy(algo.replay_buffer, explore_time, 19)
 
 
     
