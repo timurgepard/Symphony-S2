@@ -241,14 +241,13 @@ class Symphony(object):
 
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device)
 
-        self.nets = ActorCritic(state_dim, action_dim, max_action=max_action,).to(device)
-        self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action,).to(device)
+        self.nets = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
+        self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
         self.nets_target.load_state_dict(self.nets.state_dict())
 
         self.learning_rate = 3e-4
 
         self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=self.learning_rate)
-          
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
