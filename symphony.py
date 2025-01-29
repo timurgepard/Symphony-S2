@@ -209,7 +209,7 @@ class ActorCritic(jit.ScriptModule):
     # Symphony updates seeds each step, it is better not to use a decorator here
     def actor_soft(self, state):
         x, x_max = self.actor(state)
-        x = x + 0.2 * self.a_max  * torch.randn_like(x).clamp(-2.5, 2.5)
+        x += 0.2 * self.a_max  * torch.randn_like(x).clamp(-2.5, 2.5)
         return self.squash(x), x_max
 
 
@@ -324,12 +324,12 @@ class ReplayBuffer:
 
         #Normalized index conversion into fading probabilities
         def fade(norm_index):
-            weights = np.tanh(30*norm_index**3) # linear / -> non-linear _/‾
+            weights = np.tanh(30*norm_index**10) # linear / -> non-linear _/‾
             return weights/np.sum(weights) #probabilities
 
 
         self.capacity, self.length, self.device = capacity, 0, device
-        self.batch_size = 768
+        self.batch_size = 512
         self.random = np.random.default_rng()
         self.indexes = np.arange(0, capacity, 1)
         self.probs = fade(self.indexes/capacity)
