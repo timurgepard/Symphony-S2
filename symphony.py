@@ -195,7 +195,7 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor(self, state):
-        x = self.a(state).clamp(-2.5, 2.5).reshape(-1,2,self.action_dim)
+        x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
         x_max = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
         return x_max*torch.tanh(x[:,1]/x_max), x_max
 
@@ -222,7 +222,7 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def reg(self, x):
-        reg = 0.0025 * torch.log(x/(1-x))**2
+        reg = 0.00125 * torch.log(x/(1-x))**2
         return reg.mean(dim=-1, keepdim=True)
 
     # take average in between min and mean
@@ -290,7 +290,7 @@ class Symphony(object):
 
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
-        k = 1/2
+        k = 0.5
 
 
         with torch.no_grad():
@@ -323,12 +323,12 @@ class ReplayBuffer:
 
         #Normalized index conversion into fading probabilities
         def fade(norm_index):
-            weights = np.tanh(30*norm_index**10) # linear / -> non-linear _/‾
+            weights = np.tanh(70*norm_index**30 + 0.02*norm_index**2) # linear / -> non-linear _/‾
             return weights/np.sum(weights) #probabilities
 
 
-        self.capacity, self.length, self.device = 100000, 0, device
-        self.batch_size = 512
+        self.capacity, self.length, self.device = 250000, 0, device
+        self.batch_size = 256
         self.random = np.random.default_rng()
         self.indexes = np.arange(0, self.capacity, 1)
         self.probs = fade(self.indexes/self.capacity)
@@ -340,6 +340,14 @@ class ReplayBuffer:
         self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
 
 
+    def fill(self):
+        times = self.capacity//self.length
+        self.states.repeat(times, 1)
+        self.actions.repeat(times, 1)
+        self.rewards.repeat(times, 1)
+        self.next_states.repeat(times, 1)
+        self.dones.repeat(times, 1)
+        self.length = times*self.length
 
 
 
