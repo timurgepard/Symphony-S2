@@ -341,12 +341,18 @@ class ReplayBuffer:
 
 
     def fill(self):
+        def repeat(tensor, times):
+            temp = tensor[:self.length]
+            return temp.repeat(times, 1)
+        
         times = self.capacity//self.length
-        self.states.repeat(times, 1)
-        self.actions.repeat(times, 1)
-        self.rewards.repeat(times, 1)
-        self.next_states.repeat(times, 1)
-        self.dones.repeat(times, 1)
+
+        self.states = repeat(self.states, times)
+        self.actions = repeat(self.actions, times)
+        self.rewards = repeat(self.rewards, times)
+        self.next_states = repeat(self.next_states, times)
+        self.dones = repeat(self.dones, times)
+
         self.length = times*self.length
 
 
