@@ -128,36 +128,10 @@ def hard_recovery(algo, replay_buffer, size):
     algo.replay_buffer.rewards[:size] = replay_buffer.rewards[:size]
     algo.replay_buffer.next_states[:size] = replay_buffer.next_states[:size]
     algo.replay_buffer.dones[:size] = replay_buffer.dones[:size]
-    algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
     algo.replay_buffer.length = len(replay_buffer.indices)
-    algo.replay_buffer.cnt = replay_buffer.cnt
-    algo.replay_buffer.batch_size = replay_buffer.batch_size
-
-def hard_recovery_to_bfloat16(algo, replay_buffer, size):
-    algo.replay_buffer.states[:size] = torch.tensor(replay_buffer.states[:size], dtype=torch.bfloat16, device=device)
-    algo.replay_buffer.actions[:size] = torch.tensor(replay_buffer.actions[:size], dtype=torch.bfloat16, device=device)
-    algo.replay_buffer.rewards[:size] = torch.tensor(replay_buffer.rewards[:size], dtype=torch.bfloat16, device=device)
-    algo.replay_buffer.next_states[:size] = torch.tensor(replay_buffer.next_states[:size], dtype=torch.bfloat16, device=device)
-    algo.replay_buffer.dones[:size] = torch.tensor(replay_buffer.dones[:size], dtype=torch.bfloat16, device=device)
-    algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
-    algo.replay_buffer.length = len(replay_buffer.indices)
-    algo.replay_buffer.cnt = replay_buffer.cnt
-    algo.replay_buffer.batch_size = replay_buffer.batch_size
 
 
-def explore_copy(rb, e_time, times):
-    for i in range(times):
-        start_time = i*e_time
-        end_time = (i+1)*e_time
-        start_time_c = (i+1)*e_time
-        end_time_c = (i+2)*e_time
 
-        rb.states[start_time_c:end_time_c] = rb.states[start_time:end_time]
-        rb.actions[start_time_c:end_time_c] = rb.actions[start_time:end_time]
-        rb.rewards[start_time_c:end_time_c] = rb.rewards[start_time:end_time]
-        rb.next_states[start_time_c:end_time_c] = rb.next_states[start_time:end_time]
-        rb.dones[start_time_c:end_time_c] = rb.dones[start_time:end_time]
-    rb.length += e_time*times
 
 #==============================================================================================
 #==============================================================================================
@@ -213,7 +187,6 @@ try:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
         #hard_recovery(algo, dict['buffer'], 200000+20000) # comment the previous line and chose a memory size to recover from old buffer
-        #hard_recovery_to_bfloat16(algo, dict['buffer'], 158750+20000) # comment the previous line and chose a memory size to recover from old buffer
         algo.q_next_ema = dict['q_next_ema']
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
@@ -274,7 +247,7 @@ if not Q_learning:
     
     #total_steps = 0
     print("copying explore data")
-    explore_copy(algo.replay_buffer, explore_time, 19)
+    algo.replay_buffer.fill()
 
 
     
