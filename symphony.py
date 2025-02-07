@@ -203,7 +203,8 @@ class ActorCritic(jit.ScriptModule):
     def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
         self.x_max = self.a_max*torch.tanh(x[:,0]/self.a_max)
-        return self.x_max*torch.tanh(x[:,1]/self.x_max)
+        x = x[:,1] + 0.1 * self.a_max * torch.randn_like(x[:,1]).clamp(-3.0, 3.0)
+        return self.x_max*torch.tanh(x/self.x_max)
 
 
 
@@ -218,7 +219,7 @@ class ActorCritic(jit.ScriptModule):
     # take average in between min and mean
     @jit.script_method
     def critic_soft(self, state, action):
-        reg =  (0.5 * torch.log((1-self.x_max)/(1+self.x_max)))**2
+        reg =  (0.5 * torch.log(1/torch.abs(self.x_max)-1))**2
         x = self.critic(state, action)
         x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 + 0.01 * reg.mean(dim=-1, keepdim=True))
         return x, x.detach()
