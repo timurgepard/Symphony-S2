@@ -250,8 +250,6 @@ if not Q_learning:
     algo.replay_buffer.fill()
 
 
-    #print(algo.replay_buffer.states[4990:5005])
-
 
     
 
