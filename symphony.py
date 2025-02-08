@@ -172,7 +172,7 @@ class ActorCritic(jit.ScriptModule):
 
         self.a = FeedForward(state_dim, 2*action_dim)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
-        self.x_max = nn.Parameter(data= max_action, requires_grad=True)
+        self.x_max = nn.Parameter(data= 0.5*max_action, requires_grad=True)
 
 
         self.qA = FeedForward(state_dim+action_dim, 128)
@@ -208,7 +208,7 @@ class ActorCritic(jit.ScriptModule):
     # take average in between min and mean
     @jit.script_method
     def critic_soft(self, state, action):
-        s2 = (0.5 * torch.log(1/self.x_max - 1) + 1e-6)**2
+        s2 = (0.5 * torch.log(3/self.x_max - 3))**2
         x = self.critic(state, action)
         x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
         return x, x.detach()
