@@ -192,7 +192,7 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
-        x_max = self.a_max*torch.tanh(x[:,0]/self.a_max) + torch.sign(x[:,0]) * 1e-6
+        x_max = self.a_max*torch.tanh(x[:,0]/self.a_max) + torch.sign(x[:,0]).detach() * 1e-8
         return x_max*torch.tanh(x[:,1]/x_max)
 
 
