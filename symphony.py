@@ -210,7 +210,7 @@ class ActorCritic(jit.ScriptModule):
     def critic_soft(self, state, action):
         s2 = (0.5 * torch.log(1/self.x_max - 1) + 1e-6)**2
         x = self.critic(state, action)
-        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2)
+        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
         return x, x.detach()
         
 
