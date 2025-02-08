@@ -171,7 +171,7 @@ class ActorCritic(jit.ScriptModule):
 
 
         self.a = FeedForward(state_dim, 2*action_dim)
-        self.a_max = nn.Parameter(data= 0.9 * max_action, requires_grad=False)
+        self.a_max = nn.Parameter(data= 0.99 * max_action, requires_grad=False)
 
 
         self.qA = FeedForward(state_dim+action_dim, 128)
@@ -191,7 +191,7 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
-        x_max = self.a_max*torch.tanh(x[:,0]/self.a_max) + torch.sign(x[:,0]).detach() * 0.1
+        x_max = self.a_max*torch.tanh(x[:,0]/self.a_max) + torch.sign(x[:,0]).detach() * 0.01
         return x_max*torch.tanh(x[:,1]/x_max)
 
 
