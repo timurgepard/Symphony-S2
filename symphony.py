@@ -192,7 +192,8 @@ class ActorCritic(jit.ScriptModule):
     def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
         x_max = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
-        return x_max*torch.tanh(x[:,1]/x_max), x_max
+        x = x[:,1] + 0.1 * self.a_max * torch.randn_like(x[:,1]).clamp(-3.0, 3.0)
+        return x_max*torch.tanh(x/x_max), x_max
 
 
 
@@ -209,7 +210,7 @@ class ActorCritic(jit.ScriptModule):
     def critic_soft(self, state, action, x_max):
         s2 = (0.5 * torch.log(1/x_max - 1))**2
         x = self.critic(state, action)
-        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
+        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.005 * s2.mean(dim=-1, keepdim=True))
         return x, x.detach()
         
 
@@ -271,7 +272,7 @@ class Symphony(object):
 
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
-        k = 0.15
+        k = 0.2
 
 
         with torch.no_grad():
