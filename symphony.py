@@ -191,7 +191,7 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
-        x_max = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
+        x_max = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max) + 0.02 * torch.randn_like(x[:,0]).clamp(-3.0, 3.0)
         return x_max*torch.tanh(x[:,1]/x_max), x_max
 
 
@@ -248,12 +248,9 @@ class Symphony(object):
 
 
 
-
-
     def select_action(self, state, mean=False):
-        state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
         with torch.no_grad(): action = self.nets.actor(state)[0]
-        return action.cpu().data.numpy().flatten()
+        return action
 
 
     def train(self):
