@@ -172,7 +172,6 @@ class ActorCritic(jit.ScriptModule):
 
         self.a = FeedForward(state_dim, 2*action_dim)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
-        self.x_max = nn.Parameter(data= 0.5*max_action, requires_grad=True)
 
 
         self.qA = FeedForward(state_dim+action_dim, 128)
@@ -192,8 +191,8 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
-        self.x_max = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
-        return self.x_max*torch.tanh(x[:,1]/self.x_max)
+        x_max = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
+        return x_max*torch.tanh(x[:,1]/x_max), x_max
 
 
 
@@ -207,8 +206,8 @@ class ActorCritic(jit.ScriptModule):
 
     # take average in between min and mean
     @jit.script_method
-    def critic_soft(self, state, action):
-        s2 = (0.5 * torch.log(3/self.x_max - 3))**2
+    def critic_soft(self, state, action, x_max):
+        s2 = (0.5 * torch.log(3/x_max - 3))**2
         x = self.critic(state, action)
         x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
         return x, x.detach()
@@ -237,7 +236,7 @@ class Symphony(object):
         self.max_action = max_action
       
 
-        self.tau = 0.005
+        self.tau = 0.003
         self.tau_ = 1.0 - self.tau
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -253,7 +252,7 @@ class Symphony(object):
 
     def select_action(self, state, mean=False):
         state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
-        with torch.no_grad(): action = self.nets.actor(state)
+        with torch.no_grad(): action = self.nets.actor(state)[0]
         return action.cpu().data.numpy().flatten()
 
 
@@ -280,8 +279,8 @@ class Symphony(object):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
 
         #with torch.cuda.amp.autocast(dtype=torch.float32):
-        next_action = self.nets.actor(next_state)
-        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
+        next_action, next_max_action = self.nets.actor(next_state)
+        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_max_action)
         q = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
         qs = self.nets.critic(state, action)
 
