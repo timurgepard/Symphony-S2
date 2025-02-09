@@ -207,7 +207,7 @@ class ActorCritic(jit.ScriptModule):
     # take average in between min and mean
     @jit.script_method
     def critic_soft(self, state, action, x_max):
-        s2 = (0.5 * torch.log(3/x_max - 3))**2
+        s2 = (0.5 * torch.log(1/x_max - 1))**2
         x = self.critic(state, action)
         x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
         return x, x.detach()
@@ -236,7 +236,7 @@ class Symphony(object):
         self.max_action = max_action
       
 
-        self.tau = 0.003
+        self.tau = 0.005
         self.tau_ = 1.0 - self.tau
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -271,7 +271,7 @@ class Symphony(object):
 
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
-        k = 1/5
+        k = 0.15
 
 
         with torch.no_grad():
