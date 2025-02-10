@@ -192,7 +192,7 @@ class ActorCritic(jit.ScriptModule):
     def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
         x_max = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
-        x = x[:,1] + 0.1 * self.a_max * torch.randn_like(x[:,1]).clamp(-3.0, 3.0)
+        x = x[:,1] + 0.03 * self.a_max * torch.randn_like(x[:,1]).clamp(-3.0, 3.0)
         return x_max*torch.tanh(x/x_max), x_max
 
 
@@ -210,7 +210,7 @@ class ActorCritic(jit.ScriptModule):
     def critic_soft(self, state, action, x_max):
         s2 = (0.5 * torch.log(1/x_max - 1))**2
         x = self.critic(state, action)
-        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.005 * s2.mean(dim=-1, keepdim=True))
+        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
         return x, x.detach()
         
 
@@ -309,8 +309,8 @@ class ReplayBuffer:
             return weights/np.sum(weights) #probabilities
 
 
-        self.capacity, self.length, self.device = 500000, 0, device
-        self.batch_size = 384
+        self.capacity, self.length, self.device = 384000, 0, device
+        self.batch_size = 256
         self.random = np.random.default_rng()
         self.indexes = np.arange(0, self.capacity, 1)
         self.probs = fade(self.indexes/self.capacity)
