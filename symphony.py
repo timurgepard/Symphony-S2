@@ -245,9 +245,6 @@ class Symphony(object):
 
 
         self.q_next_ema = 0.0
-        self.scaler = torch.cuda.amp.GradScaler()
-
-
 
 
 
@@ -279,7 +276,6 @@ class Symphony(object):
             for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
 
-        #with torch.cuda.amp.autocast(dtype=torch.float32):
         next_action, next_max_action = self.nets.actor(next_state)
         q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_max_action)
         q = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
