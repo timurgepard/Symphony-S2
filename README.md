@@ -1,5 +1,11 @@
 # Symphony-S2 (Saya)
 
+The Symphony algorithm solves two conflicting problems of Reinforcement Learning: Sample Efficiency and harmonious humanoid agent movements in Model-Free Reinforcement Learning. On-policy algorithms like PPO solved the problem of harmonious humanoid agent movements using a small gradient step, which leads to a larger number of Samples. But PPO has proven itself in simulations, where you can parallelize the learning process over many environments, and make a gradient step based on a larger number of roll-outs, so this process requires a careful transition from simulation to a real robot. When it comes to training on a real robot from scratch, an off-policy algorithm like SAC based on DDPG and its derivatives is often used.
+
+Energy Economy and Safety during actions, Stagnation on a Local Extremum.
+
+When we divide the function argument by a number k, and then multiply the function by this number, as a result we get proportional scaling.
+
 Nothing is possible without our Lord and Saviour Jesus Christ. But everything is possible with Him. I was morally dying, addicted to ponrography and video-games. But He intervened, and gave me a new life. Reinfocement Learning to play with and University to support me.
 
 This repository was created to support the 2024 draft paper.
