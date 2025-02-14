@@ -203,9 +203,10 @@ class ActorCritic(jit.ScriptModule):
     # take average in between min and mean
     @jit.script_method
     def critic_soft(self, state, action, x_lim):
-        s2 = 0.1*torch.log(1.8*x_lim + 0.1)**2
+        #s2 = torch.log(1.8*x_lim + 0.1)**2 # coefficient is 0.1
+        s2 = (2*x_lim - 1)**2
         x = self.critic(state, action)
-        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - s2.mean(dim=-1, keepdim=True))
+        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
         return x, x.detach()
 
 
@@ -330,13 +331,12 @@ class ReplayBuffer:
 
         self.length = times*self.length
 
-        
 
 
 
     def add(self, state, action, reward, next_state, done):
-        extra = int(max(0, 10 - self.dones[self.length-512:].sum().item())) if (done and self.length>=512) else 0
-        for _ in range(1+extra):
+        repeat = int(max(0, 1 - self.dones[self.length-256:].sum().item())) if (done and self.length>=256) else 0
+        for _ in range(1+repeat):
 
             if self.length<self.capacity: self.length += 1
 
