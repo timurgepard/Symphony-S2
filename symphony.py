@@ -312,7 +312,7 @@ class ReplayBuffer:
         self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
 
-        self.n = torch.tensor([-1, -2, -3], dtype=torch.float32, device=device)  # Steps -1, -2, -3
+        self.n = torch.tensor([-1, -2], dtype=torch.float32, device=device)  # Steps -1, -2, -3
 
 
     def fill(self):
@@ -335,25 +335,26 @@ class ReplayBuffer:
 
 
     def add(self, state, action, reward, next_state, done):
-        if done: self.dones[-3:, :] = (1-self.dones[-3:, :]) * (1 - torch.exp(self.n[:, None] - 3))
+        done_repeat = int(max(0, 5 - self.dones[-100:].sum().item())) if done else 0
+        for _ in range(1+done*done_repeat):
 
-        if self.length<self.capacity: self.length += 1
+            if self.length<self.capacity: self.length += 1
 
-        idx = self.length-1
-        
-        self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
-        self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
-        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
-        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
-        self.dones[idx,:] = torch.tensor([done], dtype=torch.float32, device=self.device)
+            idx = self.length-1
+            
+            self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
+            self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
+            self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
+            self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
+            self.dones[idx,:] = torch.tensor([done], dtype=torch.float32, device=self.device)
 
 
-        if self.length>=self.capacity:
-            self.states = torch.roll(self.states, shifts=-1, dims=0)
-            self.actions = torch.roll(self.actions, shifts=-1, dims=0)
-            self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
-            self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
-            self.dones = torch.roll(self.dones, shifts=-1, dims=0)
+            if self.length>=self.capacity:
+                self.states = torch.roll(self.states, shifts=-1, dims=0)
+                self.actions = torch.roll(self.actions, shifts=-1, dims=0)
+                self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
+                self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
+                self.dones = torch.roll(self.dones, shifts=-1, dims=0)
 
 
    
