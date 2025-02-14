@@ -182,6 +182,7 @@ class ActorCritic(jit.ScriptModule):
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
 
         self.eps = 1.0
+        self.x = 0.0
 
 
 
@@ -190,8 +191,9 @@ class ActorCritic(jit.ScriptModule):
     def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
         x_lim = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
-        x_out = min(1.0, 1-self.eps) * x[:,1] + max(0.05, self.eps) * self.a_max * (1.25*torch.rand_like(x[:,1])-0.5)
-        self.eps -= 0.0002/5
+        x_out = (1-self.eps) * x[:,1] + self.eps * self.a_max * (1.25*torch.rand_like(x[:,1])-0.5)
+        self.eps = 1 - math.tanh(self.x)**2
+        self.x += 0.0002/5
         return x_lim*torch.tanh(x_out/x_lim), x_lim
 
 
