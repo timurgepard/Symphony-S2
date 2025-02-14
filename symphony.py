@@ -206,10 +206,10 @@ class ActorCritic(jit.ScriptModule):
     # take average in between min and mean
     @jit.script_method
     def critic_soft(self, state, action, x_lim):
-        #s2 = torch.log(1.8*x_lim + 0.1)**2 # coefficient is 0.1
-        s2 = (2*x_lim - 1)**2 # coefficient is 0.01
+        s2 = torch.log(1.8*x_lim + 0.1)**2 # coefficient is 0.1
+        #s2 = (2*x_lim - 1)**2 # coefficient is 0.01
         x = self.critic(state, action)
-        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
+        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.1 * s2.mean(dim=-1, keepdim=True))
         return x, x.detach()
 
 
