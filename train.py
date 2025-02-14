@@ -151,7 +151,7 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
             np.random.seed(r2)
             random.seed(r3)
 
-            action = algo.select_action(state, mean=True)
+            action = algo.select_action(state, noise=False)
             next_state, reward, done, truncated, info = env.step(action)
             rewards.append(reward)
             state = next_state
