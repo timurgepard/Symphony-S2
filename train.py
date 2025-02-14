@@ -23,7 +23,7 @@ print(device)
 
 #global parameters
 # environment type.
-option = 2
+option = 3
 
 
 explore_time = 5120
@@ -54,7 +54,7 @@ elif option == 2:
     env_test = gym.make('Walker2d-v4')
 
 elif option == 3:
-    env = gym.make('Humanoid-v4')
+    env = gym.make('Humanoid-v4', render_mode="human")
     env_test = gym.make('Humanoid-v4')
 
 elif option == 4:
@@ -151,7 +151,7 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
             np.random.seed(r2)
             random.seed(r3)
 
-            action = algo.select_action(state, noise=False)
+            action = algo.select_action(state)
             next_state, reward, done, truncated, info = env.step(action)
             rewards.append(reward)
             state = next_state
