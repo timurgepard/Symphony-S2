@@ -231,8 +231,7 @@ if not Q_learning:
             #action = algo.select_action(state)
             next_state, reward, done, truncated, info = env_test.step(action)
             rewards.append(reward)
-            if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True
-            if Q_learning: break
+            if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
             algo.replay_buffer.add(state, action, reward, next_state, done)
             if done: break
             state = next_state
