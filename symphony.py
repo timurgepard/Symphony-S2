@@ -181,6 +181,8 @@ class ActorCritic(jit.ScriptModule):
 
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
 
+        self.eps = 1.0
+
 
 
     #========= Actor Forward Pass =========
@@ -188,11 +190,12 @@ class ActorCritic(jit.ScriptModule):
     def actor(self, state, noise:bool=True):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
         x_lim = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
-        if noise: x[:,1] += 0.07 * self.a_max * torch.randn_like(x[:,1]).clamp(-3.0, 3.0)
-        return x_lim*torch.tanh(x[:,1]/x_lim), x_lim
+        x_out = min(1.0, 1-self.eps) * x[:,1] + max(0.05, self.eps) * self.a_max * (1.25*torch.rand_like(x[:,1])-0.5)
+        self.eps -= 0.0002/5
+        return x_lim*torch.tanh(x_out/x_lim), x_lim
 
 
-    #========= Critic Forward Pass =========
+    #========= Critic Forward Pass ========
     # take 3 distributions and concatenate them
     @jit.script_method
     def critic(self, state, action):
@@ -204,7 +207,7 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic_soft(self, state, action, x_lim):
         #s2 = torch.log(1.8*x_lim + 0.1)**2 # coefficient is 0.1
-        s2 = (2*x_lim - 1)**2
+        s2 = (2*x_lim - 1)**2 # coefficient is 0.01
         x = self.critic(state, action)
         x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
         return x, x.detach()
