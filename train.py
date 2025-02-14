@@ -26,7 +26,7 @@ print(device)
 option = 2
 
 
-explore_time = 5000
+explore_time = 5120
 limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
@@ -64,12 +64,12 @@ elif option == 4:
     env_test = gym.make('HumanoidStandup-v4')
 
 elif option == 5:
-    env = gym.make('Ant-v4', render_mode="human")
+    env = gym.make('Ant-v4')
     env_test = gym.make('Ant-v4')
 
 
 elif option == 6:
-    env = gym.make('BipedalWalker-v3', render_mode="human")
+    env = gym.make('BipedalWalker-v3')
     env_test = gym.make('BipedalWalker-v3')
 
 elif option == 7:
@@ -226,22 +226,24 @@ if not Q_learning:
         for steps in range(1, limit_step+1):
             total_steps += 1
         
-            if total_steps>=explore_time and not Q_learning: Q_learning = True
+            
             action = max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim)
             #action = algo.select_action(state)
             next_state, reward, done, truncated, info = env_test.step(action)
             rewards.append(reward)
-            if done and abs(reward) == 100.0: reward /= 50.0 
+            if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True
+            if Q_learning: break
             algo.replay_buffer.add(state, action, reward, next_state, done)
+            if done: break
             state = next_state
-            if Q_learning or done: break
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
 
     
     #total_steps = 0
-    print("copying explore data")
+    print("copying explore data, current length", algo.replay_buffer.length)
     algo.replay_buffer.fill()
+    print("new replay buffer length: ", algo.replay_buffer.length)
 
 
 
@@ -268,7 +270,7 @@ for i in range(start_episode, num_episodes):
     #----------------------------pre-processing------------------------------
 
     #--------------------2. CPU/GPU cooling ------------------
-    time.sleep(0.75)
+    time.sleep(3)
 
 
     for steps in range(1, limit_step+1):
@@ -290,11 +292,10 @@ for i in range(start_episode, num_episodes):
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
-        if done and abs(reward) == 100.0: reward /= 50.0 
         algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train()
-        state = next_state
         if done: break
+        state = next_state
 
     episode_rewards_all.append(np.sum(rewards))
     average_reward = np.mean(episode_rewards_all[-100:])
@@ -307,6 +308,3 @@ for i in range(start_episode, num_episodes):
     print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {episode_steps} | total_steps = {total_steps}")
 
     log_file.write_opt(str(i) + " : " + str(round(episode_rewards_all[-1], 2)) + " : step : " + str(total_steps) + "\n")
-
-
- 
