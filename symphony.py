@@ -105,6 +105,15 @@ class ReHAE(jit.ScriptModule):
         return e.mean()
 
 
+class s2(jit.ScriptModule):
+    def __init__(self):
+        super(s2, self).__init__()
+
+    @jit.script_method
+    def forward(self, x, k:float):
+        x = (0.5 * k * torch.log(1/x-1))**2
+        return x.mean()
+
 
 #Linear Layer followed by Silent Dropout
 # nn.Module -> JIT C++ graph
@@ -174,11 +183,12 @@ class ActorCritic(jit.ScriptModule):
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
 
 
-        self.qA = FeedForward(state_dim+action_dim, 128)
-        self.qB = FeedForward(state_dim+action_dim, 128)
-        self.qC = FeedForward(state_dim+action_dim, 128)
+        self.q = FeedForward(state_dim+action_dim, 3*action_dim)
+        #self.qB = FeedForward(state_dim+action_dim, action_dim)
+        #self.qC = FeedForward(state_dim+action_dim, action_dim)
 
-        self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
+
+        #self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
 
         self.max_action = max_action
         self.action_dim = action_dim
@@ -187,32 +197,32 @@ class ActorCritic(jit.ScriptModule):
 
 
     #========= Actor Forward Pass =========
+
     @jit.script_method
     def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
-        x_max = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
-        # small noise for electromagnetic enterference problems
-        x = x[:,1] + 0.03 * self.a_max * torch.randn_like(x[:,1]).clamp(-3.0, 3.0)
-        return x_max*torch.tanh(x/x_max), x_max
-
+        x_lim = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
+        x_out = x[:,1] + 0.1 * self.a_max * torch.rand_like(x[:,1]).clamp(-3.0, 3.0)
+        return x_lim*torch.tanh(x_out/x_lim), x_lim
 
 
     #========= Critic Forward Pass =========
     # take 3 distributions and concatenate them
     @jit.script_method
     def critic(self, state, action):
-        x = torch.cat([state, action], -1)
-        return torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
+        return self.q(torch.cat([state, action], -1))
+        #x = torch.cat([state, action], -1)
+        #return torch.cat([qnet(x) for qnet in self.qnets], dim=1)
 
 
     # take average in between min and mean
     @jit.script_method
-    def critic_soft(self, state, action, x_max):
-        s2 = (0.5 * torch.log(1/x_max - 1))**2
-        x = self.critic(state, action)
-        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
-        return x, x.detach()
-        
+    def critic_soft(self, state, action, x_lim):
+        q = self.critic(state, action).reshape(-1, 3, self.action_dim).min(dim=1)[0]
+        b = (1 - 0.01 * (2*x_lim-1)**2)
+        q_soft = (b*q).sum(dim=-1, keepdim=True)/b.sum(dim=-1, keepdim=True)
+        return q_soft, q_soft.detach()
+
 
 
 
@@ -232,6 +242,7 @@ class Symphony(object):
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
+        self.reg = s2()
 
 
         self.max_action = max_action
@@ -273,17 +284,17 @@ class Symphony(object):
 
 
         with torch.no_grad():
-            for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
+            for target_param, param in zip(self.nets_target.q.parameters(), self.nets.q.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
 
-        next_action, next_max_action = self.nets.actor(next_state)
-        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_max_action)
-        q = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
-        qs = self.nets.critic(state, action)
+        next_action, next_limit = self.nets.actor(next_state)
+        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_limit)
+        q_target = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
+        q_pred = self.nets.critic(state, action)
 
 
         q_next_ema = self.tau_ * self.q_next_ema + self.tau * q_next_target_value
-        nets_loss = -self.rehae(q_next_target-q_next_ema, k) + self.rehse(q-qs, k)
+        nets_loss = -self.rehae(q_next_target-q_next_ema, k) + self.rehse(q_target-q_pred, k)
 
         nets_loss.backward()
         self.nets_optimizer.step()
@@ -305,7 +316,7 @@ class ReplayBuffer:
             return weights/np.sum(weights) #probabilities
 
 
-        self.capacity, self.length, self.device = 384000, 0, device
+        self.capacity, self.length, self.device = 256000, 0, device
         self.batch_size = 256
         self.random = np.random.default_rng()
         self.indexes = np.arange(0, self.capacity, 1)
@@ -333,14 +344,17 @@ class ReplayBuffer:
 
         self.length = times*self.length
 
-
-
     def add(self, state, action, reward, next_state, done):
+        # if done is encountered convert the previous transition's done into True
+        # store a new transition with done 2 times.
+        if done: self.dones[-1] = torch.tensor([done], dtype=torch.float32, device=self.device)
+        for _ in range(1+done): self.store_transition(state, action, reward, next_state, done)
+
+    def store_transition(self, state, action, reward, next_state, done):
 
         if self.length<self.capacity: self.length += 1
-            
         idx = self.length-1
-        
+
         self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
         self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
         self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
