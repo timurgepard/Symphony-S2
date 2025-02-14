@@ -187,7 +187,7 @@ class ActorCritic(jit.ScriptModule):
 
     #========= Actor Forward Pass =========
     @jit.script_method
-    def actor(self, state, noise:bool=True):
+    def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
         x_lim = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
         x_out = min(1.0, 1-self.eps) * x[:,1] + max(0.05, self.eps) * self.a_max * (1.25*torch.rand_like(x[:,1])-0.5)
