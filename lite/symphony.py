@@ -178,10 +178,10 @@ class ActorCritic(jit.ScriptModule):
 
     #========= Actor Forward Pass =========
     @jit.script_method
-    def actor(self, state, noise:bool=True):
+    def actor(self, state):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
         x_lim = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
-        if noise: x[:,1] += 0.07 * self.a_max * torch.randn_like(x[:,1]).clamp(-3.0, 3.0)
+        x[:,1] += 0.05 * self.a_max * torch.randn_like(x[:,1]).clamp(-3.0, 3.0)
         return x_lim*torch.tanh(x[:,1]/x_lim), x_lim
 
 
@@ -231,9 +231,9 @@ class Symphony(object):
         
  
 
-    def select_action(self, state, noise=True):
+    def select_action(self, state):
         state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
-        with torch.no_grad(): action = self.nets.actor(state, noise)[0]
+        with torch.no_grad(): action = self.nets.actor(state)[0]
         return action.cpu().data.numpy().flatten()
     
 
@@ -320,25 +320,25 @@ class ReplayBuffer:
 
 
     def add(self, state, action, reward, next_state, done):
-        if done: self.dones[-1, :] = torch.tensor([True], dtype=torch.float32, device=self.device)
+        for _ in range(1+done):
 
-        if self.length<self.capacity: self.length += 1
+            if self.length<self.capacity: self.length += 1
 
-        idx = self.length-1
-        
-        self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
-        self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
-        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
-        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
-        self.dones[idx,:] = torch.tensor([done], dtype=torch.float32, device=self.device)
+            idx = self.length-1
+            
+            self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
+            self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
+            self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
+            self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
+            self.dones[idx,:] = torch.tensor([done], dtype=torch.float32, device=self.device)
 
 
-        if self.length>=self.capacity:
-            self.states = torch.roll(self.states, shifts=-1, dims=0)
-            self.actions = torch.roll(self.actions, shifts=-1, dims=0)
-            self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
-            self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
-            self.dones = torch.roll(self.dones, shifts=-1, dims=0)
+            if self.length>=self.capacity:
+                self.states = torch.roll(self.states, shifts=-1, dims=0)
+                self.actions = torch.roll(self.actions, shifts=-1, dims=0)
+                self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
+                self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
+                self.dones = torch.roll(self.dones, shifts=-1, dims=0)
 
 
 
