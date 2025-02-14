@@ -188,8 +188,8 @@ class ActorCritic(jit.ScriptModule):
     def actor(self, state, noise:bool=True):
         x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
         x_lim = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
-        if noise: x = x[:,1] + 0.1 * self.a_max * torch.randn_like(x[:,1]).clamp(-3.0, 3.0)
-        return x_lim*torch.tanh(x/x_lim), x_lim
+        if noise: x[:,1] += 0.1 * self.a_max * torch.randn_like(x[:,1]).clamp(-3.0, 3.0)
+        return x_lim*torch.tanh(x[:,1]/x_lim), x_lim
 
 
     #========= Critic Forward Pass =========
