@@ -38,7 +38,7 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning, average_steps 
 
 
 if option == -1:
-    env = gym.make('Pendulum-v1')
+    env = gym.make('Pendulum-v1', render_mode="human")
     env_test = gym.make('Pendulum-v1')
 
 elif option == 0:
@@ -50,7 +50,7 @@ elif option == 1:
     env_test = gym.make('HalfCheetah-v4')
 
 elif option == 2:
-    env = gym.make('Walker2d-v4', render_mode="human")
+    env = gym.make('Walker2d-v4')
     env_test = gym.make('Walker2d-v4')
 
 elif option == 3:
@@ -69,7 +69,7 @@ elif option == 5:
 
 
 elif option == 6:
-    env = gym.make('BipedalWalker-v3')
+    env = gym.make('BipedalWalker-v3', render_mode="human")
     env_test = gym.make('BipedalWalker-v3')
 
 elif option == 7:
@@ -270,7 +270,7 @@ for i in range(start_episode, num_episodes):
     #----------------------------pre-processing------------------------------
 
     #--------------------2. CPU/GPU cooling ------------------
-    time.sleep(3)
+    time.sleep(1.0)
 
 
     for steps in range(1, limit_step+1):
