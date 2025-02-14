@@ -335,7 +335,7 @@ class ReplayBuffer:
 
 
     def add(self, state, action, reward, next_state, done):
-        extra = int(max(0, 10 - self.dones[self.length-500:].sum().item())) if (done and self.length>=500) else 0
+        extra = int(max(0, 10 - self.dones[self.length-512:].sum().item())) if (done and self.length>=512) else 0
         for _ in range(1+extra):
 
             if self.length<self.capacity: self.length += 1
