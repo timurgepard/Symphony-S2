@@ -23,7 +23,7 @@ print(device)
 
 #global parameters
 # environment type.
-option = 3
+option = 2
 
 
 explore_time = 5120
@@ -50,11 +50,11 @@ elif option == 1:
     env_test = gym.make('HalfCheetah-v4')
 
 elif option == 2:
-    env = gym.make('Walker2d-v4')
+    env = gym.make('Walker2d-v4', render_mode="human")
     env_test = gym.make('Walker2d-v4')
 
 elif option == 3:
-    env = gym.make('Humanoid-v4', render_mode="human")
+    env = gym.make('Humanoid-v4')
     env_test = gym.make('Humanoid-v4')
 
 elif option == 4:
@@ -214,6 +214,7 @@ except:
 #==============================================================================================
 
 
+
 if not Q_learning:
     log_file.clean()
     total_steps = 0
@@ -226,7 +227,7 @@ if not Q_learning:
             total_steps += 1
         
             
-            action = max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim)
+            action = algo.select_action(state)
             next_state, reward, done, truncated, info = env_test.step(action)
             rewards.append(reward)
             if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
@@ -257,7 +258,6 @@ if not Q_learning:
 print("started training")
 #print(f"ReSine scale:\n {algo.actor.ffw[0].ffw[3].scale.cpu().detach().numpy()}")
 
-noise_level = 1.0
 
 for i in range(start_episode, num_episodes):
 
@@ -286,8 +286,8 @@ for i in range(start_episode, num_episodes):
                 pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
             
 
-        action = max(0, noise_level) * max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim) + min(1, 1-noise_level) * algo.select_action(state)
-        noise_level -= 0.0001
+ 
+        action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
         algo.replay_buffer.add(state, action, reward, next_state, done)
