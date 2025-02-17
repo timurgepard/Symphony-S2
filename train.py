@@ -32,7 +32,7 @@ limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
 start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning, average_steps = [], [], [], False, 0
-
+terminal_reward = False
 
 
 
@@ -71,16 +71,17 @@ elif option == 5:
 elif option == 6:
     env = gym.make('BipedalWalker-v3', render_mode="human")
     env_test = gym.make('BipedalWalker-v3')
+    terminal_reward = True
 
 elif option == 7:
-    env = gym.make('BipedalWalkerHardcore-v3')
-    env_test = gym.make('BipedalWalkerHardcore-v3')
+    env = gym.make('BipedalWalkerHardcore-v3', render_mode="human")
+    env_test = gym.make('BipedalWalkerHardcore-v3', render_mode="human")
+    terminal_reward = True
 
 elif option == 8:
-    limit_step = 700
-    limit_eval = 700
     env = gym.make('LunarLanderContinuous-v2')
     env_test = gym.make('LunarLanderContinuous-v2')
+    terminal_reward = True
 
 elif option == 9:
     limit_step = 300
@@ -97,8 +98,6 @@ elif option == 11:
     env = gym.make('Hopper-v4')
     env_test = gym.make('Hopper-v4')
 
-
-terminal_reward = True if (env.spec.id.find("BipedalWalkerHardcore") != -1 or env.spec.id.find("LunarLander") != -1) else False
 
 state_dim = env.observation_space.shape[0]
 action_dim= env.action_space.shape[0]
@@ -228,7 +227,6 @@ if not Q_learning:
         for steps in range(1, limit_step+1):
             total_steps += 1
         
-            
             action = max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim)
             #action = algo.select_action(state)
             next_state, reward, done, truncated, info = env_test.step(action)
