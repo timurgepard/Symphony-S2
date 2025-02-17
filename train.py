@@ -235,7 +235,7 @@ if not Q_learning:
             rewards.append(reward)
             
             if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
-            if terminal_reward and abs(reward)==100.0: reward /= 50
+            if done and terminal_reward and abs(reward)==100.0: reward /= 50
             algo.replay_buffer.add(state, action, reward, next_state, done)
             if done: break
             state = next_state
@@ -295,7 +295,7 @@ for i in range(start_episode, num_episodes):
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
-        if terminal_reward and abs(reward)==100.0: reward /= 50
+        if done and terminal_reward and abs(reward)==100.0: reward /= 50
         algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train()
         if done: break
