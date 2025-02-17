@@ -23,7 +23,7 @@ print(device)
 
 #global parameters
 # environment type.
-option = 2
+option = 3
 
 
 explore_time = 5120
@@ -50,7 +50,7 @@ elif option == 1:
     env_test = gym.make('HalfCheetah-v4')
 
 elif option == 2:
-    env = gym.make('Walker2d-v4', render_mode="human")
+    env = gym.make('Walker2d-v4')
     env_test = gym.make('Walker2d-v4')
 
 elif option == 3:
@@ -97,6 +97,8 @@ elif option == 11:
     env = gym.make('Hopper-v4')
     env_test = gym.make('Hopper-v4')
 
+
+terminal_reward = True if (env.spec.id.find("BipedalWalkerHardcore") != -1 or env.spec.id.find("LunarLander") != -1) else False
 
 state_dim = env.observation_space.shape[0]
 action_dim= env.action_space.shape[0]
@@ -227,10 +229,13 @@ if not Q_learning:
             total_steps += 1
         
             
-            action = algo.select_action(state)
+            action = max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim)
+            #action = algo.select_action(state)
             next_state, reward, done, truncated, info = env_test.step(action)
             rewards.append(reward)
+            
             if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
+            if terminal_reward and abs(reward)==100.0: reward /= 50
             algo.replay_buffer.add(state, action, reward, next_state, done)
             if done: break
             state = next_state
@@ -290,6 +295,7 @@ for i in range(start_episode, num_episodes):
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
+        if terminal_reward and abs(reward)==100.0: reward /= 50
         algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train()
         if done: break
