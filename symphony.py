@@ -86,10 +86,9 @@ class ReHSE(jit.ScriptModule):
         super(ReHSE, self).__init__()
 
     @jit.script_method
-    def forward(self, e, k:float):
-        ae = torch.abs(e) + 1e-6
-        ae = ae**k*torch.tanh(k*ae/2)
-        return ae.mean()
+    def forward(self, e):
+        e_ = torch.abs(e) + 1e-8
+        return (torch.sqrt(e_)*torch.tanh(e_/4)).mean()
 
 
 #Rectified Huber Asymmetric Error Loss Function via JIT Module
@@ -99,10 +98,9 @@ class ReHAE(jit.ScriptModule):
         super(ReHAE, self).__init__()
 
     @jit.script_method
-    def forward(self, e, k:float):
-        e = e + 1e-6
-        e = torch.abs(e)**k*torch.tanh(k*e/2)
-        return e.mean()
+    def forward(self, e):
+        e_ = torch.abs(e) + 1e-8
+        return (torch.sqrt(e_)*torch.tanh(e/4)).mean()
 
 
 
@@ -168,36 +166,32 @@ class ActorCritic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, max_action=1.0):
         super().__init__()
 
-
-
-        self.a = FeedForward(state_dim, 2*action_dim)
+        self.a = FeedForward(state_dim, 3*action_dim)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
         self.action_dim = action_dim
-
-
-        self.qA = FeedForward(state_dim+action_dim, 128)
-        self.qB = FeedForward(state_dim+action_dim, 128)
-        self.qC = FeedForward(state_dim+action_dim, 128)
+        policy = 192//self.action_dim
+        self.policies = 3*policy
+        
+        self.qA = FeedForward(state_dim+action_dim, policy*action_dim)
+        self.qB = FeedForward(state_dim+action_dim, policy*action_dim)
+        self.qC = FeedForward(state_dim+action_dim, policy*action_dim)
 
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
 
-        self.eps = 1.0
-        self.x = 0.0
-
-
+        
 
     #========= Actor Forward Pass =========
     @jit.script_method
     def actor(self, state):
-        x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
-        x_lim = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
-        x_out = (1-self.eps) * x[:,1] + self.eps * self.a_max * (1.25*torch.rand_like(x[:,1])-0.5)
-        self.eps = 1 - math.tanh(self.x)**2
-        self.x += 0.0002/5
-        return x_lim*torch.tanh(x_out/x_lim), x_lim
+        x = self.a(state).clamp(-3.0, 3.0).reshape(-1,3,self.action_dim)
+        x_opt = self.a_max*torch.sigmoid(2*x[:,:2]/self.a_max)
+        x_lim, x_std = x_opt[:,0], x_opt[:,1]
+        x_out = x_lim*torch.tanh(x[:,2]/x_lim) + x_std * (1.75*torch.rand_like(x[:,2])-0.7)
+        return x_out.clamp(-self.a_max, self.a_max), x_lim, x_std
 
 
-    #========= Critic Forward Pass ========
+
+    #========= Critic Forward Pass =========
     # take 3 distributions and concatenate them
     @jit.script_method
     def critic(self, state, action):
@@ -205,12 +199,16 @@ class ActorCritic(jit.ScriptModule):
         return torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
 
 
+
+    @jit.script_method
+    def saya2(self, x):
+        return torch.log(1.8*x+0.1)**2
+
     # take average in between min and mean
     @jit.script_method
-    def critic_soft(self, state, action, x_lim):
-        s2 = (2*x_lim - 1)**2 # coefficient is 0.01
-        x = self.critic(state, action)
-        x = 0.5 * (x.min(dim=-1, keepdim=True)[0] + x.mean(dim=-1, keepdim=True)) * (1 - 0.01 * s2.mean(dim=-1, keepdim=True))
+    def critic_soft(self, state, action, lim, std):
+        x = self.critic(state, action).reshape(-1, self.policies, self.action_dim)
+        x = 0.5 * (x.min(dim=1)[0]+x.mean(dim=1)) * (1.0 - 0.02*self.saya2(lim) - 0.02*self.saya2(std))
         return x, x.detach()
 
 
@@ -222,6 +220,7 @@ class Symphony(object):
 
         self.tau = 0.005
         self.tau_ = 1.0 - self.tau
+        self.learning_rate = 3e-4
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.device = device
@@ -234,25 +233,26 @@ class Symphony(object):
         self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
         self.nets_target.load_state_dict(self.nets.state_dict())
 
-        self.learning_rate = 3e-4
-
+        
         self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=self.learning_rate, alpha=self.tau_)
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
 
-          
-
-
+        
+ 
+    
     def select_action(self, state):
         state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
         with torch.no_grad(): action = self.nets.actor(state)[0]
         return action.cpu().data.numpy().flatten()
     """
-    def select_action(self, state):
+
+    def select_action(self, state, mean=False):
         with torch.no_grad(): action = self.nets.actor(state)[0]
         return action
     """
+    
 
 
     def train(self):
@@ -270,29 +270,24 @@ class Symphony(object):
 
         state, action, reward, next_state, done = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
-        k = 0.5
 
 
         with torch.no_grad():
             for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
 
-        next_action, next_max_action = self.nets.actor(next_state)
-        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_max_action)
-        q = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
-        qs = self.nets.critic(state, action)
+        next_action, next_limit, next_std = self.nets.actor(next_state)
+        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_limit, next_std)
+        q_target = (0.01 * reward + (1-done) * 0.99 * q_next_target_value).mean(dim=-1, keepdim=True)
+        q_pred = self.nets.critic(state, action)
 
 
         q_next_ema = self.tau_ * self.q_next_ema + self.tau * q_next_target_value
-        nets_loss = -self.rehae(q_next_target-q_next_ema, k) + self.rehse(q-qs, k)
+        nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target)
 
         nets_loss.backward()
         self.nets_optimizer.step()
         self.q_next_ema = q_next_ema.mean()
-
-
-
-     
 
 
 
@@ -313,7 +308,7 @@ class ReplayBuffer:
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
-        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
+        self.rewards = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
         self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
 
@@ -339,16 +334,18 @@ class ReplayBuffer:
 
 
     def add(self, state, action, reward, next_state, done):
-        repeat = int(max(0, 1 - self.dones[self.length-256:].sum().item())) if (done and self.length>=256) else 0
-        for _ in range(1+repeat):
+        if reward<3.75: reward = 3.75 + 1.25 * reward - 0.1*action**2
+        extra = max(0, int(1 - self.dones[self.length-256:].sum().item())) if (done and self.length>=256) else 0
+        for _ in range(1+extra):
 
             if self.length<self.capacity: self.length += 1
 
             idx = self.length-1
+
             
             self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
             self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
-            self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
+            self.rewards[idx,:] = torch.tensor(reward, dtype=torch.float32, device=self.device)
             self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
             self.dones[idx,:] = torch.tensor([done], dtype=torch.float32, device=self.device)
 
@@ -359,6 +356,8 @@ class ReplayBuffer:
                 self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
                 self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
                 self.dones = torch.roll(self.dones, shifts=-1, dims=0)
+
+        #return reward.mean()
 
 
    
