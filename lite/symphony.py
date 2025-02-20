@@ -208,8 +208,7 @@ class ActorCritic(jit.ScriptModule):
     # take average in between min and mean
     @jit.script_method
     def critic_soft(self, state, action, std):
-        x = self.critic(state, action) *  (1.0 - 0.005 * torch.log(std)**2)
-        #x = 0.5 * (x.min(dim=1)[0] + x.mean(dim=1)) * (1.0 + 0.02 * torch.log(std+1e-3))
+        x = self.critic(state, action) *  (1.0 - 0.01 * torch.log(std)**2)
         return x, x.detach()
 
 
