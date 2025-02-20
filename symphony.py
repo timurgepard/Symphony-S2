@@ -151,7 +151,7 @@ class FeedForward(jit.ScriptModule):
             nn.Linear(512, 384),
             ReSine(384),
             LinearSDropout(384, 256, 0.5),
-            LinearSDropout(256, f_out, 0.75)
+            LinearSDropout(256, f_out, 0.7)
         )
 
     @jit.script_method
@@ -203,7 +203,8 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic(self, state, action):
         x = torch.cat([state, action], -1)
-        return torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
+        x = torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
+        return x.reshape(-1, self.policies, self.action_dim).mean(dim=1)
 
 
 
@@ -211,8 +212,7 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic_soft(self, state, action, lim):
         s2 = torch.log(2.0*lim + 1e-3)**2
-        x = self.critic(state, action).reshape(-1, self.policies, self.action_dim).mean(dim=1)
-        x = x * (1.0 - 0.005 * s2)
+        x = self.critic(state, action)* (1.0 - 0.005 * s2)
         return x, x.detach()
 
 
@@ -282,7 +282,7 @@ class Symphony(object):
 
         next_action, next_limit = self.nets.actor(next_state)
         q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_limit)
-        q_target = (0.01 * reward + (1-done) * 0.99 * q_next_target_value).mean(dim=-1, keepdim=True)
+        q_target = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
         q_pred = self.nets.critic(state, action)
 
 
