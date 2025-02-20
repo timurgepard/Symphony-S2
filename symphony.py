@@ -168,18 +168,19 @@ class ActorCritic(jit.ScriptModule):
         self.action_dim = action_dim
         
         policy = 256//action_dim
-        self.policies = 2*policy
+        
 
         self.a = FeedForward(state_dim, 2*action_dim)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
         self.eps_x = nn.Parameter(data= torch.zeros(1), requires_grad=False)
 
         
-        self.qA = FeedForward(state_dim+action_dim, 128)
-        self.qB = FeedForward(state_dim+action_dim, 128)
-        self.qC = FeedForward(state_dim+action_dim, 128)
+        self.qA = FeedForward(state_dim+action_dim, policy*action_dim)
+        self.qB = FeedForward(state_dim+action_dim, policy*action_dim)
+        self.qC = FeedForward(state_dim+action_dim, policy*action_dim)
 
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
+        self.policies = len(self.qnets)*policy
 
 
 
@@ -210,8 +211,8 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic_soft(self, state, action, lim):
         s2 = torch.log(2.0*lim + 1e-3)**2
-        x = self.critic(state, action).reshape(-1, 1, 384)
-        x = 0.5 * (x.min(dim=-1)[0] + x.mean(dim=-1)) * (1.0 - 0.005 * s2)
+        x = self.critic(state, action).reshape(-1, self.policies, self.action_dim)
+        x = 0.5 * (x.min(dim=1)[0] + x.mean(dim=1)) * (1.0 - 0.005 * s2)
         return x, x.detach()
 
 
