@@ -78,7 +78,6 @@ log_file = LogFile(log_name_main, log_name_opt)
 
 
 
-
 #Rectified Huber Symmetric Error Loss Function via JIT Module
 # nn.Module -> JIT C++ graph
 class ReHSE(jit.ScriptModule):
@@ -87,8 +86,8 @@ class ReHSE(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, e):
-        e_ = torch.abs(e) + 1e-8
-        return (torch.sqrt(e_)*torch.tanh(e_/4)).mean()
+        ae = torch.abs(e) + 1e-8
+        return (torch.sqrt(ae)*torch.tanh(ae/4)).mean()
 
 
 #Rectified Huber Asymmetric Error Loss Function via JIT Module
@@ -99,9 +98,9 @@ class ReHAE(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, e):
-        e_ = torch.abs(e) + 1e-8
-        return (torch.sqrt(e_)*torch.tanh(e/4)).mean()
-
+        ae = torch.abs(e) + 1e-8
+        return (torch.sqrt(ae)*torch.tanh(e/4)).mean()
+    
 
 
 #Linear Layer followed by Silent Dropout
@@ -166,28 +165,35 @@ class ActorCritic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, max_action=1.0):
         super().__init__()
 
-        self.a = FeedForward(state_dim, 3*action_dim)
-        self.a_max = nn.Parameter(data= max_action, requires_grad=False)
         self.action_dim = action_dim
-        policy = 192//self.action_dim
-        self.policies = 3*policy
         
-        self.qA = FeedForward(state_dim+action_dim, policy*action_dim)
-        self.qB = FeedForward(state_dim+action_dim, policy*action_dim)
-        self.qC = FeedForward(state_dim+action_dim, policy*action_dim)
+        policy = 256//action_dim
+        self.policies = 2*policy
+
+        self.a = FeedForward(state_dim, 2*action_dim)
+        self.a_max = nn.Parameter(data= max_action, requires_grad=False)
+        self.eps_x = nn.Parameter(data= torch.zeros(1), requires_grad=False)
+
+        
+        self.qA = FeedForward(state_dim+action_dim, 128)
+        self.qB = FeedForward(state_dim+action_dim, 128)
+        self.qC = FeedForward(state_dim+action_dim, 128)
 
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
+
+
 
         
 
     #========= Actor Forward Pass =========
     @jit.script_method
     def actor(self, state):
-        x = self.a(state).clamp(-3.0, 3.0).reshape(-1,3,self.action_dim)
-        x_opt = self.a_max*torch.sigmoid(2*x[:,:2]/self.a_max)
-        x_lim, x_std = x_opt[:,0], x_opt[:,1]
-        x_out = x_lim*torch.tanh(x[:,2]/x_lim) + x_std * (1.75*torch.rand_like(x[:,2])-0.7)
-        return x_out.clamp(-self.a_max, self.a_max), x_lim, x_std
+        x = self.a(state).clamp(-3.0, 3.0).reshape(-1,2,self.action_dim)
+        x_lim = self.a_max*torch.sigmoid(2*x[:,0]/self.a_max)
+        x_out = math.tanh(self.eps_x)**3 * x[:,1] + 0.5 * self.a_max * (torch.rand_like(x[:,1]) - 0.4)
+        x_out = x_lim*torch.tanh(x_out/x_lim)
+        self.eps_x += 0.0001/5
+        return x_out, x_lim
 
 
 
@@ -200,15 +206,12 @@ class ActorCritic(jit.ScriptModule):
 
 
 
-    @jit.script_method
-    def saya2(self, x):
-        return torch.log(1.8*x+0.1)**2
-
     # take average in between min and mean
     @jit.script_method
-    def critic_soft(self, state, action, lim, std):
-        x = self.critic(state, action).reshape(-1, self.policies, self.action_dim)
-        x = 0.5 * (x.min(dim=1)[0]+x.mean(dim=1)) * (1.0 - 0.02*self.saya2(lim) - 0.02*self.saya2(std))
+    def critic_soft(self, state, action, lim):
+        s2 = torch.log(2.0*lim + 1e-3)**2
+        x = self.critic(state, action).reshape(-1, 1, 384)
+        x = 0.5 * (x.min(dim=-1)[0] + x.mean(dim=-1)) * (1.0 - 0.005 * s2)
         return x, x.detach()
 
 
@@ -262,7 +265,7 @@ class Symphony(object):
         np.random.seed(r2)
         random.seed(r3)
 
-        for _ in range(5): self.update()
+        for _ in range(4): self.update()
 
 
 
@@ -276,8 +279,8 @@ class Symphony(object):
             for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
 
-        next_action, next_limit, next_std = self.nets.actor(next_state)
-        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_limit, next_std)
+        next_action, next_limit = self.nets.actor(next_state)
+        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_limit)
         q_target = (0.01 * reward + (1-done) * 0.99 * q_next_target_value).mean(dim=-1, keepdim=True)
         q_pred = self.nets.critic(state, action)
 
@@ -294,6 +297,7 @@ class Symphony(object):
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device):
 
+
         #Normalized index conversion into fading probabilities
         def fade(norm_index):
             weights = np.tanh(70*norm_index**30 + 0.02*norm_index**2) # linear / -> non-linear _/вЂѕ
@@ -301,7 +305,7 @@ class ReplayBuffer:
 
 
         self.capacity, self.length, self.device = 512000, 0, device
-        self.batch_size = 256
+        self.batch_size = 320
         self.random = np.random.default_rng()
         self.indexes = np.arange(0, self.capacity, 1)
         self.probs = fade(self.indexes/self.capacity)
@@ -311,8 +315,7 @@ class ReplayBuffer:
         self.rewards = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
         self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
-
-        self.n = torch.tensor([-1, -2], dtype=torch.float32, device=device)  # Steps -1, -2, -3
+        self.action_dim = action_dim
 
 
     def fill(self):
@@ -329,35 +332,44 @@ class ReplayBuffer:
         self.dones = repeat(self.dones, times)
 
         self.length = times*self.length
+        
 
 
 
+    def add(self, state, action, reward, next_state, done, info):
 
-    def add(self, state, action, reward, next_state, done):
-        if reward<3.75: reward = 3.75 + 1.25 * reward - 0.1*action**2
-        extra = max(0, int(1 - self.dones[self.length-256:].sum().item())) if (done and self.length>=256) else 0
-        for _ in range(1+extra):
+        reward = 1.0 + info['x_velocity']  - 0.05*action**2 if ("x_velocity" in info) else reward  - 0.05*action**2
 
-            if self.length<self.capacity: self.length += 1
+        if self.length<self.capacity: self.length += 1
 
-            idx = self.length-1
+        idx = self.length-1
+        
+        self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
+        self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
+        self.rewards[idx,:] = torch.tensor(reward, dtype=torch.float32, device=self.device)
+        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
+        self.dones[idx,:] = torch.tensor([done], dtype=torch.float32, device=self.device)
 
-            
-            self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
-            self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
-            self.rewards[idx,:] = torch.tensor(reward, dtype=torch.float32, device=self.device)
-            self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
-            self.dones[idx,:] = torch.tensor([done], dtype=torch.float32, device=self.device)
+        # when done is met, we replace the last 5% portion of transitions with Bellman Equation
+        # small shift from bootstrap to supervised learning
+        if done: 
+            dones_idx = torch.nonzero(self.dones[:idx] == True)
+            if dones_idx.numel() > 0:
+                replace = int(0.05 * (idx - dones_idx[-1][0].item())) #last 5% transitions replace
+                for i in range(replace):
+                    self.dones[idx-1-i] = done
+                    self.rewards[idx-1-i] += 0.99 * self.rewards[idx-i]
 
 
-            if self.length>=self.capacity:
-                self.states = torch.roll(self.states, shifts=-1, dims=0)
-                self.actions = torch.roll(self.actions, shifts=-1, dims=0)
-                self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
-                self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
-                self.dones = torch.roll(self.dones, shifts=-1, dims=0)
+        if self.length>=self.capacity:
+            self.states = torch.roll(self.states, shifts=-1, dims=0)
+            self.actions = torch.roll(self.actions, shifts=-1, dims=0)
+            self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
+            self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
+            self.dones = torch.roll(self.dones, shifts=-1, dims=0)
 
-        #return reward.mean()
+
+
 
 
    
