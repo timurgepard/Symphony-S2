@@ -169,7 +169,7 @@ class ActorCritic(jit.ScriptModule):
         policy = 256//action_dim
         
 
-        self.a = FeedForward(state_dim, action_dim)
+        self.a = FeedForward(state_dim, 2*action_dim)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
         self.eps_x = nn.Parameter(data= torch.zeros(1), requires_grad=False)
 
@@ -187,11 +187,11 @@ class ActorCritic(jit.ScriptModule):
 
     #========= Actor Forward Pass =========
     @jit.script_method
-    def actor(self, state):
-        x = self.a(state)
-        x_out = torch.tanh(self.eps_x)**3 * x + 0.5 * self.a_max * (torch.rand_like(x) - 0.4)
-        self.eps_x += 0.0001/5
-        return self.a_max*torch.tanh(x_out/self.a_max)
+    def actor(self, state, mean:bool=False):
+        x = self.a(state).clamp(-3.0, 3.0).reshape(-1, 2, self.action_dim)
+        x_out, x_std = x[:,0], torch.exp(x[:,1])
+        if not mean:x_out = x_out +  0.5 * x_std * (torch.rand_like(x_out) - 0.4)
+        return self.a_max*torch.tanh(x_out/self.a_max), x_std
 
 
 
@@ -200,15 +200,16 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic(self, state, action):
         x = torch.cat([state, action], -1)
-        return torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
+        x = torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
+        return x.reshape(-1, self.policies, self.action_dim).mean(dim=1)
 
 
 
     # take average in between min and mean
     @jit.script_method
-    def critic_soft(self, state, action):
-        x = self.critic(state, action).reshape(-1, self.policies, self.action_dim)
-        x = 0.5 * (x.min(dim=1)[0] + x.mean(dim=1))
+    def critic_soft(self, state, action, std):
+        x = self.critic(state, action) *  (1.0 - 0.005 * torch.log(std)**2)
+        #x = 0.5 * (x.min(dim=1)[0] + x.mean(dim=1)) * (1.0 + 0.02 * torch.log(std+1e-3))
         return x, x.detach()
 
 
@@ -242,9 +243,9 @@ class Symphony(object):
         
  
     
-    def select_action(self, state):
+    def select_action(self, state, mean=False):
         state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
-        with torch.no_grad(): action = self.nets.actor(state)
+        with torch.no_grad(): action = self.nets.actor(state, mean=mean)[0]
         return action.cpu().data.numpy().flatten()
     """
 
@@ -276,14 +277,14 @@ class Symphony(object):
             for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
 
-        next_action = self.nets.actor(next_state)
-        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
+        next_action, next_std = self.nets.actor(next_state)
+        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action, next_std)
         q_target = 0.01 * reward + (1-done) * 0.99 * q_next_target_value
         q_pred = self.nets.critic(state, action)
 
 
         q_next_ema =  0.99 * self.q_next_ema + 0.01 * q_next_target_value
-        nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target.mean(dim=-1, keepdim=True))
+        nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target)
 
         nets_loss.backward()
         self.nets_optimizer.step()
