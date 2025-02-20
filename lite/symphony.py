@@ -169,7 +169,7 @@ class ActorCritic(jit.ScriptModule):
 
         self.action_dim = action_dim
         
-        policy = 256//action_dim
+        policy = 192//action_dim
         
 
         self.a = FeedForward(state_dim, action_dim, dropout=False)
@@ -192,7 +192,7 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor(self, state):
         x = self.a(state)
-        x_out = math.tanh(self.eps_x)**3 * x + 0.5 * self.a_max * (torch.rand_like(x) - 0.4)
+        x_out = torch.tanh(self.eps_x)**3 * x + 0.5 * self.a_max * (torch.rand_like(x) - 0.4)
         self.eps_x += 0.0001/5
         return self.a_max*torch.tanh(x_out/self.a_max)
 
@@ -203,15 +203,15 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic(self, state, action):
         x = torch.cat([state, action], -1)
-        x = torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
-        return x.reshape(-1, self.policies, self.action_dim).mean(dim=1)
+        return torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
 
 
 
     # take average in between min and mean
     @jit.script_method
     def critic_soft(self, state, action):
-        x = self.critic(state, action)
+        x = self.critic(state, action).reshape(-1, self.policies, self.action_dim)
+        x = 0.5 * (x.min(dim=1)[0] + x.mean(dim=1))
         return x, x.detach()
 
 
@@ -233,11 +233,11 @@ class Symphony(object):
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device)
 
         self.nets = ActorCritic(state_dim, action_dim, max_action=max_action, dropout=False).to(device)
-        self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action, dropout=True).to(device)
+        self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action, dropout=False).to(device)
         self.nets_target.load_state_dict(self.nets.state_dict())
 
         
-        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=self.learning_rate, alpha=self.tau_)
+        self.nets_optimizer = optim.RMSprop(self.nets.parameters(), lr=self.learning_rate, alpha=0.99)
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
@@ -285,8 +285,8 @@ class Symphony(object):
         q_pred = self.nets.critic(state, action)
 
 
-        q_next_ema = self.tau_ * self.q_next_ema + self.tau * q_next_target_value
-        nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target)
+        q_next_ema =  0.99 * self.q_next_ema + 0.01 * q_next_target_value
+        nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target.mean(dim=-1, keepdim=True))
 
         nets_loss.backward()
         self.nets_optimizer.step()
