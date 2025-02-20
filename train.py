@@ -23,7 +23,7 @@ print(device)
 
 #global parameters
 # environment type.
-option = 3
+option = 2
 
 
 explore_time = 5120
@@ -54,7 +54,7 @@ elif option == 2:
     env_test = gym.make('Walker2d-v4')
 
 elif option == 3:
-    env = gym.make('Humanoid-v4')
+    env = gym.make('Humanoid-v4', render_mode="human")
     env_test = gym.make('Humanoid-v4')
 
 elif option == 4:
@@ -64,7 +64,7 @@ elif option == 4:
     env_test = gym.make('HumanoidStandup-v4')
 
 elif option == 5:
-    env = gym.make('Ant-v4')
+    env = gym.make('Ant-v4', render_mode="human")
     env_test = gym.make('Ant-v4')
 
 
@@ -74,8 +74,8 @@ elif option == 6:
     terminal_reward = True
 
 elif option == 7:
-    env = gym.make('BipedalWalkerHardcore-v3', render_mode="human")
-    env_test = gym.make('BipedalWalkerHardcore-v3', render_mode="human")
+    env = gym.make('BipedalWalkerHardcore-v3')
+    env_test = gym.make('BipedalWalkerHardcore-v3')
     terminal_reward = True
 
 elif option == 8:
@@ -225,6 +225,12 @@ if not Q_learning:
         state = env_test.reset()[0]
 
         for steps in range(1, limit_step+1):
+
+            r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+            torch.manual_seed(r1)
+            np.random.seed(r2)
+            random.seed(r3)
+
             total_steps += 1
         
             action = max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim)
@@ -234,7 +240,7 @@ if not Q_learning:
             
             if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
             if done and terminal_reward and abs(reward)==100.0: reward /= 50
-            algo.replay_buffer.add(state, action, reward, next_state, done)
+            algo.replay_buffer.add(state, action, reward, next_state, done, info)
             if done: break
             state = next_state
         Return = np.sum(rewards)
@@ -275,6 +281,13 @@ for i in range(start_episode, num_episodes):
 
 
     for steps in range(1, limit_step+1):
+
+        r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+        torch.manual_seed(r1)
+        np.random.seed(r2)
+        random.seed(r3)
+
+
         episode_steps += 1
         total_steps += 1
 
@@ -294,7 +307,7 @@ for i in range(start_episode, num_episodes):
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
         if done and terminal_reward and abs(reward)==100.0: reward /= 50
-        algo.replay_buffer.add(state, action, reward, next_state, done)
+        algo.replay_buffer.add(state, action, reward, next_state, done, info)
         algo.train()
         if done: break
         state = next_state
