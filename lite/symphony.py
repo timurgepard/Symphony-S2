@@ -151,8 +151,8 @@ class FeedForward(jit.ScriptModule):
             nn.LayerNorm(512),
             nn.Linear(512, 384),
             ReSine(384),
-            LinearSDropout(384, 256),
-            LinearSDropout(256, f_out, dropout)
+            LinearSDropout(384, 384),
+            LinearSDropout(384, f_out, dropout)
         )
 
 
@@ -169,7 +169,7 @@ class ActorCritic(jit.ScriptModule):
 
         self.action_dim = action_dim
         
-        policy = 192//action_dim
+        policy = 256//action_dim
         
 
         self.a = FeedForward(state_dim, action_dim, dropout=False)
