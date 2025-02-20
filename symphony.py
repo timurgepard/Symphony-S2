@@ -151,7 +151,7 @@ class FeedForward(jit.ScriptModule):
             nn.Linear(512, 384),
             ReSine(384),
             LinearSDropout(384, 256, 0.5),
-            LinearSDropout(256, f_out, 0.5)
+            LinearSDropout(256, f_out, 0.75)
         )
 
     @jit.script_method
@@ -211,8 +211,8 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic_soft(self, state, action, lim):
         s2 = torch.log(2.0*lim + 1e-3)**2
-        x = self.critic(state, action).reshape(-1, self.policies, self.action_dim)
-        x = 0.5 * (x.min(dim=1)[0] + x.mean(dim=1)) * (1.0 - 0.005 * s2)
+        x = self.critic(state, action).reshape(-1, self.policies, self.action_dim).mean(dim=1)
+        x = x * (1.0 - 0.005 * s2)
         return x, x.detach()
 
 
