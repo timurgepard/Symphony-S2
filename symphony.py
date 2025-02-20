@@ -106,10 +106,10 @@ class ReHAE(jit.ScriptModule):
 #Linear Layer followed by Silent Dropout
 # nn.Module -> JIT C++ graph
 class LinearSDropout(jit.ScriptModule):
-    def __init__(self, f_in, f_out, p=0.5):
+    def __init__(self, f_in, f_out, dropout=False):
         super(LinearSDropout, self).__init__()
         self.ffw = nn.Linear(f_in, f_out)
-        self.p = p
+        self.dropout = dropout
 
     @jit.script_method
     def forward(self, x):
@@ -117,7 +117,8 @@ class LinearSDropout(jit.ScriptModule):
         #Silent Dropout function created with the help of ChatGPT
         # It is not recommended to use JIT compilation decorator with online random generator as Symphony updates seeds each time
         # We did exception only for this module as it is used inside neural networks.
-        mask = (torch.rand_like(x) > self.p).float()
+        mask = (torch.rand_like(x) > 0.5).float()
+        if self.dropout: return mask * x
         return  mask * x + (1.0-mask) * x.detach()
 
 
@@ -142,7 +143,7 @@ class ReSine(jit.ScriptModule):
 #Shared Feed Forward Module
 # nn.Module -> JIT C++ graph
 class FeedForward(jit.ScriptModule):
-    def __init__(self, f_in, f_out, p_out=0.5):
+    def __init__(self, f_in, f_out, dropout=False):
         super(FeedForward, self).__init__()
 
         self.ffw = nn.Sequential(
@@ -150,9 +151,10 @@ class FeedForward(jit.ScriptModule):
             nn.LayerNorm(512),
             nn.Linear(512, 384),
             ReSine(384),
-            LinearSDropout(384, 256, 0.5),
-            LinearSDropout(256, f_out, 0.7)
+            LinearSDropout(384, 256),
+            LinearSDropout(256, f_out, dropout)
         )
+
 
     @jit.script_method
     def forward(self, x):
@@ -162,7 +164,7 @@ class FeedForward(jit.ScriptModule):
 
 # nn.Module -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, max_action=1.0):
+    def __init__(self, state_dim, action_dim, max_action=1.0, dropout=False):
         super().__init__()
 
         self.action_dim = action_dim
@@ -170,14 +172,14 @@ class ActorCritic(jit.ScriptModule):
         policy = 256//action_dim
         
 
-        self.a = FeedForward(state_dim, 2*action_dim)
+        self.a = FeedForward(state_dim, 2*action_dim, dropout=False)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
         self.eps_x = nn.Parameter(data= torch.zeros(1), requires_grad=False)
 
         
-        self.qA = FeedForward(state_dim+action_dim, policy*action_dim)
-        self.qB = FeedForward(state_dim+action_dim, policy*action_dim)
-        self.qC = FeedForward(state_dim+action_dim, policy*action_dim)
+        self.qA = FeedForward(state_dim+action_dim, policy*action_dim, dropout)
+        self.qB = FeedForward(state_dim+action_dim, policy*action_dim, dropout)
+        self.qC = FeedForward(state_dim+action_dim, policy*action_dim, dropout)
 
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
         self.policies = len(self.qnets)*policy
@@ -233,8 +235,8 @@ class Symphony(object):
 
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device)
 
-        self.nets = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
-        self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
+        self.nets = ActorCritic(state_dim, action_dim, max_action=max_action, dropout=False).to(device)
+        self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action, dropout=True).to(device)
         self.nets_target.load_state_dict(self.nets.state_dict())
 
         
