@@ -223,6 +223,7 @@ class Symphony(object):
         self.action_dim = action_dim
         self.device = device
         self.q_next_ema = 0.0
+        self.max_action = max_action
 
 
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device)
@@ -240,13 +241,15 @@ class Symphony(object):
 
 
     
-    def select_action(self, state, mean=False):
+    def select_action(self, state, mean=False, explore=False):
+        if explore: return self.max_action.numpy()*np.random.uniform(-0.5, 0.75, size=self.action_dim)
         state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
         with torch.no_grad(): action = self.nets.actor(state, mean=mean)[0]
         return action.cpu().data.numpy().flatten()
-    """
 
-    def select_action(self, state, mean=False):
+    """
+    def select_action(self, state, mean=False, explore=False):
+        if explore: self.max_action*torch.FloatTensor(self.action_dim).uniform_(-0.5, 0.75).to(device)
         with torch.no_grad(): action = self.nets.actor(state)[0]
         return action
     """
