@@ -23,7 +23,7 @@ print(device)
 
 #global parameters
 # environment type.
-option = 2
+option = 3
 
 
 explore_time = 5120
@@ -50,7 +50,7 @@ elif option == 1:
     env_test = gym.make('HalfCheetah-v4')
 
 elif option == 2:
-    env = gym.make('Walker2d-v4')
+    env = gym.make('Walker2d-v4', render_mode="human")
     env_test = gym.make('Walker2d-v4')
 
 elif option == 3:
@@ -234,25 +234,17 @@ if not Q_learning:
             total_steps += 1
         
             action = max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim)
-            #action = algo.select_action(state)
             next_state, reward, done, truncated, info = env_test.step(action)
             rewards.append(reward)
-            
             if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
-            if done and terminal_reward and abs(reward)==100.0: reward /= 50
-            algo.replay_buffer.add(state, action, reward, next_state, done, info)
+
+            algo.replay_buffer.add(state, action, reward, next_state, done, info['x_velocity'])
             if done: break
             state = next_state
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
 
     
-    #total_steps = 0
-    print("copying explore data, current length", algo.replay_buffer.length)
-    algo.replay_buffer.fill()
-    print("new replay buffer length: ", algo.replay_buffer.length)
-
-
 
     
 
@@ -304,10 +296,10 @@ for i in range(start_episode, num_episodes):
 
  
         action = algo.select_action(state)
+        #action = max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
-        if done and terminal_reward and abs(reward)==100.0: reward /= 50
-        algo.replay_buffer.add(state, action, reward, next_state, done, info)
+        algo.replay_buffer.add(state, action, reward, next_state, done, info['x_velocity'])
         algo.train()
         if done: break
         state = next_state
