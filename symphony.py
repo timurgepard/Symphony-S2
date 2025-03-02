@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.optimizer import Optimizer
 import numpy as np
 import time
 import math
@@ -76,6 +77,43 @@ log_file = LogFile(log_name_main, log_name_opt)
 #==============================================================================================
 #==============================================================================================
 
+#RMSProp without additional conditions (momentum, centered, decay)
+class RMSprop(Optimizer):
+    def __init__(self, params, lr=0.001, alpha=0.99):
+        if lr < 0.0:
+            raise ValueError("Invalid learning rate: {}".format(lr))
+        if alpha < 0.0 or alpha >= 1.0:
+            raise ValueError("Invalid alpha value: {}".format(alpha))
+        
+        # Default parameter values
+        defaults = dict(lr=lr, alpha=alpha)
+        super(RMSprop, self).__init__(params, defaults)
+
+    def step(self, closure=None):
+        loss = None
+        if closure is not None: loss = closure()
+            
+
+        for group in self.param_groups:
+            lr = group['lr']
+            alpha = group['alpha']
+
+            for p in group['params']:
+                if p.grad is None: continue
+                    
+
+                grad = p.grad.data
+                # Initialize state if it's not already initialized
+                state = self.state[p]
+                if len(state) == 0: state['square_avg'] = torch.zeros_like(p.data)
+                square_avg = state['square_avg']
+                # Update the average using the modified gradient (grad * tanh(grad / 2))
+                square_avg.mul_(alpha).addcmul_(grad, grad, value=1 - alpha)
+                
+                # Update the parameters
+                p.data.addcdiv_(grad, square_avg.sqrt().add_(1e-8), value = -lr)
+
+        return loss
 
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
@@ -169,6 +207,7 @@ class ActorCritic(jit.ScriptModule):
 
         self.a = FeedForward(state_dim, 2*action_dim)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
+        self.noise_std = nn.Parameter(data= math.sqrt(0.05) * self.a_max, requires_grad=False)
         
         self.qA = FeedForward(state_dim+action_dim, 256)
         self.qB = FeedForward(state_dim+action_dim, 256)
@@ -183,14 +222,12 @@ class ActorCritic(jit.ScriptModule):
 
     #========= Actor Forward Pass =========
     @jit.script_method
-    def actor(self, state, mean:bool=False):
+    def actor(self, state):
         ab = self.a(state).reshape(-1, 2, self.action_dim)
         ab_ = torch.tanh(ab/2)
-        a, a_, b, b_ = ab[:,0], ab_[:,0], ab_[:,0], ab_[:,1]
-        ctrl_cost = a*a_
-        beta_cost = b*b_
-        a_out = a_ + math.sqrt(0.05) * self.a_max * torch.randn_like(a_).clamp(-math.e, math.e)
-        return self.a_max*torch.tanh(a_out/self.a_max), torch.abs(b_)*ctrl_cost - 1e-3*beta_cost
+        a, a_, beta = ab[:,0], ab_[:,0], torch.abs(ab_[:,1])
+        a_out = a_ + self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)
+        return self.a_max*torch.tanh(a_out/self.a_max), beta*a*a_ - 3e-3*beta*a_
 
 
     #========= Critic Forward Pass =========
@@ -216,7 +253,7 @@ class ActorCritic(jit.ScriptModule):
 class Symphony(object):
     def __init__(self, state_dim, action_dim, device, max_action=1.0):
 
-        self.tau = 0.001
+        self.tau = 0.005
         self.tau_ = 1.0 - self.tau
         self.learning_rate = 3e-4
         self.state_dim = state_dim
@@ -232,8 +269,7 @@ class Symphony(object):
         self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
         self.nets_target.load_state_dict(self.nets.state_dict())
 
-        #AdamW with parameters close to RMSprop. weight decay 1e-3.
-        self.nets_optimizer = optim.AdamW(self.nets.parameters(), lr=self.learning_rate, betas=(0.9, 0.999), weight_decay=1e-3)
+        self.nets_optimizer = RMSprop(self.nets.parameters(), lr=self.learning_rate)
 
 
         self.rehse = ReHSE()
@@ -241,14 +277,14 @@ class Symphony(object):
 
 
     
-    def select_action(self, state, mean=False, explore=False):
+    def select_action(self, state, explore=False):
         if explore: return self.max_action.numpy()*np.random.uniform(-0.5, 0.75, size=self.action_dim)
         state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
-        with torch.no_grad(): action = self.nets.actor(state, mean=mean)[0]
+        with torch.no_grad(): action = self.nets.actor(state)[0]
         return action.cpu().data.numpy().flatten()
 
     """
-    def select_action(self, state, mean=False, explore=False):
+    def select_action(self, state, explore=False):
         if explore: self.max_action*torch.FloatTensor(self.action_dim).uniform_(-0.5, 0.75).to(device)
         with torch.no_grad(): action = self.nets.actor(state)[0]
         return action
@@ -282,10 +318,10 @@ class Symphony(object):
 
         next_action, next_option = self.nets.actor(next_state)
         q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
-        q_target = 0.01 * reward + (1-done) * 0.99 * q_next_target_value 
+        q_target = 3e-3 * reward + (1-done) * 0.99 * q_next_target_value 
         q_pred = self.nets.critic(state, action)
 
-        q_next_ema =  0.9 * self.q_next_ema + 0.1 * q_next_target_value
+        q_next_ema =  0.95 * self.q_next_ema + 0.05 * q_next_target_value
         nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target) + next_option.mean()
 
 
