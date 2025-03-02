@@ -345,7 +345,7 @@ class ReplayBuffer:
     
     
 
-    def add(self, state, action, reward, next_state, done, base_reward):
+    def add(self, state, action, reward, next_state, done):
 
         if self.length<self.capacity:
             self.length += 1
