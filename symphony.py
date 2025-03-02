@@ -260,7 +260,7 @@ class Symphony(object):
         np.random.seed(r2)
         random.seed(r3)
 
-        utd = 5 if self.replay_buffer.filled==1.0 else 4
+        utd = 5 if self.replay_buffer.filled else 4
         for _ in range(utd): self.update(1/utd)
 
 
@@ -305,6 +305,7 @@ class ReplayBuffer:
         self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.dones = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
         self.action_dim = action_dim
+        self.filled = False
 
 
 
@@ -345,7 +346,6 @@ class ReplayBuffer:
 
         if self.length<self.capacity:
             self.length += 1
-            self.filled = self.length/self.capacity
             self.indexes = np.arange(0, self.length, 1)
             self.probs = self.fade(self.indexes/self.length)
             self.batch_size = min(64 + self.length//400, 384)
@@ -362,7 +362,7 @@ class ReplayBuffer:
 
 
         if self.length>=self.capacity:
-            self.filled = 1.0
+            self.filled = True
             self.states = torch.roll(self.states, shifts=-1, dims=0)
             self.actions = torch.roll(self.actions, shifts=-1, dims=0)
             self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
