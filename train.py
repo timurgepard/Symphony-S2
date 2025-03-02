@@ -233,12 +233,12 @@ if not Q_learning:
 
             total_steps += 1
         
-            action = max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim)
+            action = algo.select_action(state, explore=True)
             next_state, reward, done, truncated, info = env_test.step(action)
             rewards.append(reward)
             if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
 
-            algo.replay_buffer.add(state, action, reward, next_state, done, info['x_velocity'])
+            algo.replay_buffer.add(state, action, reward, next_state, done)
             if done: break
             state = next_state
         Return = np.sum(rewards)
@@ -296,10 +296,9 @@ for i in range(start_episode, num_episodes):
 
  
         action = algo.select_action(state)
-        #action = max_action.numpy()*np.random.uniform(-0.5, 0.75, size=action_dim)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
-        algo.replay_buffer.add(state, action, reward, next_state, done, info['x_velocity'])
+        algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train()
         if done: break
         state = next_state
