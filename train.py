@@ -285,14 +285,14 @@ for i in range(start_episode, num_episodes):
 
         # save models, data
         if (total_steps>=1250 and total_steps%1250==0):
-            part = ""
-            #part = "_"+str(total_steps/1000) if total_steps%300000==0 else ""
+            part = "_"+str(total_steps/1000) if total_steps%100000==0 else ""
             testing(env_test, limit_step=limit_eval, test_episodes=50, current_step=total_steps, save_log=True)
-            torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
-            torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
-            with open('data'+ part, 'wb') as file:
-                pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
-            
+            if total_steps%2500==0:
+                torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
+                torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
+                with open('data'+ part, 'wb') as file:
+                    pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
+                
 
  
         action = algo.select_action(state)
