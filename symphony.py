@@ -245,6 +245,7 @@ class ActorCritic(jit.ScriptModule):
 
 
     # take average in between min and mean
+    #@jit.script_method
     def critic_soft(self, state, action):
         q = self.critic(state, action)
         q = 0.5 * (q.min(dim=-1, keepdim=True)[0] + q.mean(dim=-1, keepdim=True))
@@ -329,7 +330,7 @@ class Symphony(object):
 
         next_action, next_s2 = self.nets.actor(next_state)
         q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
-        q_target = self.replay_buffer.scale * reward + not_done_gamma  * q_next_target_value 
+        q_target =  self.replay_buffer.r_scale * reward + not_done_gamma  * q_next_target_value 
         q_pred = self.nets.critic(state, action)
 
 
@@ -369,12 +370,14 @@ class ReplayBuffer:
         return weights/np.sum(weights) #probabilities
 
 
+    def norm_Q(self, interval):
+        Q = torch.sum(torch.abs(self.rewards[self.length-interval:interval]))/interval
+        return Q.item()
 
     def fill(self):
-
-        absolute_mean = torch.sum(torch.abs(self.rewards[:self.length]))/self.length
-        self.scale = (0.01 / absolute_mean).item()
-        print("Q norm factor", self.scale)
+        self.r_scale = 0.01 / self.norm_Q(self.lenstm)
+        
+        print("reward scale factor", self.r_scale)
 
         print("copying replay data, current length", self.length)
 
@@ -411,6 +414,8 @@ class ReplayBuffer:
 
         
 
+        
+
 
 
 
@@ -424,9 +429,15 @@ class ReplayBuffer:
         self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
         self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
         self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
-        self.not_dones_gamma[idx,:] = torch.tensor([(1-done)*0.99], dtype=torch.float32, device=self.device)
-      
+        self.not_dones_gamma[idx,:] = 0.99 * (1.0 - torch.tensor([done], dtype=torch.float32, device=self.device))
 
+        self.lenstm = self.length if self.length<self.capacity else int(0.2*self.capacity)
+        if done: self.rewards[idx,:] += self.norm_Q(self.lenstm)
+            
+            
+                
+
+            
 
         if self.length>=self.capacity:
             self.states = torch.roll(self.states, shifts=-1, dims=0)
