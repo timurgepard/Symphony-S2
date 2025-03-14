@@ -245,7 +245,6 @@ class ActorCritic(jit.ScriptModule):
 
 
     # take average in between min and mean
-    @jit.script_method
     def critic_soft(self, state, action):
         q = self.critic(state, action)
         q = 0.5 * (q.min(dim=-1, keepdim=True)[0] + q.mean(dim=-1, keepdim=True))
