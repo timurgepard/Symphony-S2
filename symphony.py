@@ -421,7 +421,9 @@ class ReplayBuffer:
 
     def add(self, state, action, reward, next_state, done):
 
-        if self.length<self.capacity: self.length += 1
+        if self.length<self.capacity:
+            self.length += 1
+            self.lenstm = self.length
             
         idx = self.length-1
         
@@ -431,15 +433,12 @@ class ReplayBuffer:
         self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
         self.not_dones_gamma[idx,:] = 0.99 * (1.0 - torch.tensor([done], dtype=torch.float32, device=self.device))
 
-        self.lenstm = self.length if self.length<self.capacity else int(0.2*self.capacity)
+        
         if done: self.rewards[idx,:] += self.norm_Q(self.lenstm)
-            
-            
+
                 
-
-            
-
         if self.length>=self.capacity:
+            self.lenstm = int(0.2*self.capacity)
             self.states = torch.roll(self.states, shifts=-1, dims=0)
             self.actions = torch.roll(self.actions, shifts=-1, dims=0)
             self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
