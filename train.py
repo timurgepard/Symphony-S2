@@ -1,13 +1,11 @@
 import logging
 logging.getLogger().setLevel(logging.CRITICAL)
 import torch
-import torch.nn as nn
 import numpy as np
 import gymnasium as gym
 import random
 import pickle
 import time
-import math
 from symphony import Symphony, log_file
 
 
@@ -26,7 +24,7 @@ print(device)
 option = 3
 
 
-explore_time = 5120
+explore_time = 10240
 limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
@@ -54,7 +52,7 @@ elif option == 2:
     env_test = gym.make('Walker2d-v4')
 
 elif option == 3:
-    env = gym.make('Humanoid-v4', render_mode="human")
+    env = gym.make('Humanoid-v4')
     env_test = gym.make('Humanoid-v4')
 
 elif option == 4:
@@ -200,6 +198,7 @@ try:
     print("loading models...")
     algo.nets.load_state_dict(torch.load('nets_model.pt', weights_only=True))
     algo.nets_target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
+    algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt'))
     print('models loaded')
     #testing(env_test, limit_eval, 10)
 except:
@@ -232,12 +231,11 @@ if not Q_learning:
             random.seed(r3)
 
             total_steps += 1
-        
+
             action = algo.select_action(state, explore=True)
             next_state, reward, done, truncated, info = env_test.step(action)
             rewards.append(reward)
             if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
-
             algo.replay_buffer.add(state, action, reward, next_state, done)
             if done: break
             state = next_state
@@ -246,7 +244,7 @@ if not Q_learning:
 
     
 
-    
+    algo.replay_buffer.fill()
 
 
 #==============================================================================================
@@ -269,8 +267,7 @@ for i in range(start_episode, num_episodes):
     #----------------------------pre-processing------------------------------
 
     #--------------------2. CPU/GPU cooling ------------------
-    time.sleep(1.0)
-
+    time.sleep(0.3)
 
     for steps in range(1, limit_step+1):
 
@@ -285,14 +282,15 @@ for i in range(start_episode, num_episodes):
 
         # save models, data
         if (total_steps>=1250 and total_steps%1250==0):
+            part = ""
+            #part = "_"+str(total_steps/1000) if total_steps%300000==0 else ""
             testing(env_test, limit_step=limit_eval, test_episodes=50, current_step=total_steps, save_log=True)
-            if total_steps%2500==0:
-                part = "_"+str(total_steps/1000) if total_steps%100000==0 else ""
-                torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
-                torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
-                with open('data'+ part, 'wb') as file:
-                    pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
-                
+            torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
+            torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
+            torch.save(algo.nets_optimizer.state_dict(), "nets_optimizer.pt")
+            with open('data'+ part, 'wb') as file:
+                pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
+            
 
  
         action = algo.select_action(state)
