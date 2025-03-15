@@ -106,8 +106,9 @@ class RMSprop(optim.Optimizer):
                 state['step'] += 1
 
                 grad = p.grad
-                exp = 1.0 - (1.0-1e-7)**state['step']
-                alpha = min(0.9+0.1*exp, 0.9999)
+                #exp = 1.0 - 0.9999**state['step']
+                #alpha = min(0.9+0.1*exp, 0.9999)
+                alpha = 0.777
 
                 
                 # Update denominator
@@ -335,11 +336,12 @@ class Symphony(object):
 
 
         q_next_ema = 0.9 * self.q_next_ema + 0.1 * q_next_target_value
+        #if self.q_next_ema !=0: self.q_next_ema = q_next_target_value
         nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target) + next_s2
 
         (self.k * nets_loss).backward()
         self.nets_optimizer.step()
-        self.q_next_ema =  q_next_ema.mean()
+        self.q_next_ema =  q_next_ema.mean()#q_next_target_value.mean()
 
 
 
