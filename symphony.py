@@ -106,9 +106,9 @@ class RMSprop(optim.Optimizer):
                 state['step'] += 1
 
                 grad = p.grad
-                #exp = 1.0 - 0.9999**state['step']
-                #alpha = min(0.9+0.1*exp, 0.9999)
-                alpha = 0.777
+                exp = 1.0 - 0.99999**state['step']
+                alpha = min(0.9+0.1*exp, 0.99999)
+                #alpha = 0.9
 
                 
                 # Update denominator
