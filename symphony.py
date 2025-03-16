@@ -336,7 +336,7 @@ class Symphony(object):
 
 
         q_next_ema = 0.5 * self.q_next_ema + 0.5 * q_next_target_value
-        nets_loss = -self.rehae((q_next_target-q_next_ema)) + self.rehse(q_pred-q_target) + next_s2
+        nets_loss = -self.rehae((q_next_target-q_next_ema)/2) + self.rehse(q_pred-q_target) + next_s2
 
         (self.k * nets_loss).backward()
         self.nets_optimizer.step()
