@@ -371,12 +371,13 @@ class ReplayBuffer:
         return weights/np.sum(weights) #probabilities
 
 
-    def norm_Q(self, interval):
-        Q = torch.sum(torch.abs(self.rewards[self.length-interval:interval]))/interval
+    def norm_Q(self):
+        Q = torch.sum(torch.abs(self.rewards[:self.length]))/self.length
         return Q.item()
 
     def fill(self):
-        self.r_scale = 0.01 / self.norm_Q(self.lenstm)
+
+        self.r_scale = 0.01 / self.norm_Q()
         
         print("reward scale factor", self.r_scale)
 
@@ -422,9 +423,9 @@ class ReplayBuffer:
 
     def add(self, state, action, reward, next_state, done):
 
-        if self.length<self.capacity:
-            self.length += 1
-            self.lenstm = self.length
+        if self.length<self.capacity: self.length += 1
+            
+            
             
         idx = self.length-1
         
@@ -435,7 +436,7 @@ class ReplayBuffer:
         self.not_dones_gamma[idx,:] = 0.99 * (1.0 - torch.tensor([done], dtype=torch.float32, device=self.device))
 
         
-        if done: self.rewards[idx,:] += 0.5*self.norm_Q(self.lenstm)
+        if done: self.rewards[idx,:] += self.norm_Q()
 
                 
         if self.length>=self.capacity:
