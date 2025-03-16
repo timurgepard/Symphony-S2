@@ -106,9 +106,9 @@ class RMSprop(optim.Optimizer):
                 state['step'] += 1
 
                 grad = p.grad
-                exp = 1.0 - 0.99999**state['step']
-                alpha = min(0.9+0.1*exp, 0.99999)
-                #alpha = 0.9
+                #exp = 1.0 - 0.99999**state['step']
+                #alpha = min(0.9+0.1*exp, 0.99999)
+                alpha = 0.5
 
                 
                 # Update denominator
@@ -262,7 +262,7 @@ class Symphony(object):
         self.tau = 0.005
 
         self.tau_ = 1.0 - self.tau
-        self.learning_rate = 3e-4
+        self.learning_rate = 1e-4
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.max_action = max_action
@@ -335,13 +335,12 @@ class Symphony(object):
         q_pred = self.nets.critic(state, action)
 
 
-        q_next_ema = 0.9 * self.q_next_ema + 0.1 * q_next_target_value
-        #if self.q_next_ema !=0: self.q_next_ema = q_next_target_value
-        nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target) + next_s2
+        q_next_ema = 0.5 * self.q_next_ema + 0.5 * q_next_target_value
+        nets_loss = -self.rehae((q_next_target-q_next_ema)) + self.rehse(q_pred-q_target) + next_s2
 
         (self.k * nets_loss).backward()
         self.nets_optimizer.step()
-        self.q_next_ema =  q_next_ema.mean()#q_next_target_value.mean()
+        self.q_next_ema =  q_next_ema.mean()
 
 
 
@@ -436,7 +435,7 @@ class ReplayBuffer:
         self.not_dones_gamma[idx,:] = 0.99 * (1.0 - torch.tensor([done], dtype=torch.float32, device=self.device))
 
         
-        if done: self.rewards[idx,:] += self.norm_Q(self.lenstm)
+        if done: self.rewards[idx,:] += 0.5*self.norm_Q(self.lenstm)
 
                 
         if self.length>=self.capacity:
