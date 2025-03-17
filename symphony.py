@@ -262,14 +262,14 @@ class Symphony(object):
         self.tau = 0.005
 
         self.tau_ = 1.0 - self.tau
-        self.learning_rate = 1e-4
+        self.learning_rate = 3e-5
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.max_action = max_action
         self.device = device
         
         self.utd = 5
-        self.k = 1/2 * 1/self.utd
+        self.k = 1/self.utd
 
         self.q_next_ema = 0.0
 
@@ -313,11 +313,11 @@ class Symphony(object):
         np.random.seed(r2)
         random.seed(r3)
 
-        for _ in range(self.utd): self.update()
+        for i in range(self.utd): self.update(i+1)
 
 
 
-    def update(self):
+    def update(self, i):
 
 
         state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample()
