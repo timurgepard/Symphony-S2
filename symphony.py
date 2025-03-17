@@ -362,8 +362,6 @@ class ReplayBuffer:
         self.not_dones_gamma = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
 
 
-        self.action_dim = action_dim
-
 
     #Normalized index conversion into fading probabilities
     def fade(self, norm_index):
@@ -440,7 +438,6 @@ class ReplayBuffer:
 
                 
         if self.length>=self.capacity:
-            self.lenstm = int(0.2*self.capacity)
             self.states = torch.roll(self.states, shifts=-1, dims=0)
             self.actions = torch.roll(self.actions, shifts=-1, dims=0)
             self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
