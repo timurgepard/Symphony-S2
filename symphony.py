@@ -97,27 +97,17 @@ class RMSprop(optim.Optimizer):
 
                 
                 state = self.state[p]
-                if len(state) == 0:
-                    state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['step'] = 0.0
-                    
-                    
+                if len(state) == 0: state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
                 v = state['v']
-                state['step'] += 1
 
                 grad = p.grad
-                #exp = 1.0 - 0.99999**state['step']
-                #alpha = min(0.9+0.1*exp, 0.99999)
-                alpha = 0.5
 
-                
                 # Update denominator
-                v.mul_(alpha).addcmul_(grad, grad, value=1.0 - alpha)
+                v.mul_(0.99).addcmul_(grad, grad, value=0.01)
 
-                update = grad / (v.sqrt() + 1e-8)
-                p.add_(update, alpha=-lr)
-                
-        return
+                p.addcdiv_(grad, v.sqrt() + 1e-8, value=-lr)
+
 
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
@@ -209,10 +199,9 @@ class ActorCritic(jit.ScriptModule):
 
 
 
-        self.a = FeedForward(state_dim, 2*action_dim)
+        self.a = FeedForward(state_dim, action_dim)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
         self.noise_std = nn.Parameter(data= math.sqrt(0.05) * max_action, requires_grad=False)
-        self.eps = nn.Parameter(data=torch.zeros(1), requires_grad=False)
         
         
         self.qA = FeedForward(state_dim+action_dim, 256)
@@ -229,11 +218,12 @@ class ActorCritic(jit.ScriptModule):
     #========= Actor Forward Pass =========
     @jit.script_method
     def actor(self, state):
-        ab = self.a(state).reshape(-1, 2, self.action_dim)
-        ab_ = torch.tanh(ab/2)
-        a, a_, beta = ab[:,0], ab_[:,0], ab_[:,1].abs()
+        a = self.a(state).reshape(-1, self.action_dim)
+        a_ = torch.tanh(a/2)
+        #a, a_ = ab[:,0], ab_[:,0]#, ab_[:,1].abs()
+        ctrl_cost = a*a_
         a_out =  a_ + self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)
-        return self.a_max*torch.tanh(a_out/self.a_max), (beta*a*a_).mean()
+        return self.a_max*torch.tanh(a_out/self.a_max),  (ctrl_cost/(2*math.e)).mean()
 
 
     #========= Critic Forward Pass =========
@@ -262,7 +252,7 @@ class Symphony(object):
         self.tau = 0.005
 
         self.tau_ = 1.0 - self.tau
-        self.learning_rate = 3e-5
+        self.learning_rate = 3e-4
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.max_action = max_action
@@ -313,11 +303,11 @@ class Symphony(object):
         np.random.seed(r2)
         random.seed(r3)
 
-        for i in range(self.utd): self.update(i+1)
+        for _ in range(self.utd): self.update()
 
 
 
-    def update(self, i):
+    def update(self):
 
 
         state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample()
@@ -335,8 +325,8 @@ class Symphony(object):
         q_pred = self.nets.critic(state, action)
 
 
-        q_next_ema = 0.5 * self.q_next_ema + 0.5 * q_next_target_value
-        nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target) + next_s2
+        q_next_ema = 0.9 * self.q_next_ema + 0.1 * q_next_target_value
+        nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target) + 0.01*next_s2
 
         (self.k * nets_loss).backward()
         self.nets_optimizer.step()
