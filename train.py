@@ -1,470 +1,312 @@
+import logging
+logging.getLogger().setLevel(logging.CRITICAL)
 import torch
-import torch.nn as nn
-import torch.optim as optim
 import numpy as np
-import time
-import math
+import gymnasium as gym
 import random
-import torch.nn.functional as F
-import torch.jit as jit
-import os, re
+import pickle
+import time
+from symphony import Symphony, log_file
+
 
 
 #==============================================================================================
 #==============================================================================================
-#=========================================LOGGING=============================================
+#===================================SCRIPT FOR TRAINING========================================
 #==============================================================================================
 #==============================================================================================
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# to continue writing to the same history file and derive its name. This function created with the help of ChatGPT
-def extract_r1_r2_r3():
-    pattern = r'history_(\d+)_(\d+)_(\d+)\.log'
+print(device)
 
-    # Iterate through the files in the given directory
-    for filename in os.listdir():
-        # Match the filename with the pattern
-        match = re.match(pattern, filename)
-        if match:
-            # Extract the numbers r1, r2, and r3 from the filename
-            return map(int, match.groups())
-    return None
+#global parameters
+# environment type.
+option = 3
 
 
-#write or append to the history log file
-class LogFile(object):
-    def __init__(self, log_name_main, log_name_opt):
-        self.log_name_main = log_name_main
-        self.log_name_opt = log_name_opt
-    def write(self, text):
-        with open(self.log_name_main, 'a+') as file:
-            file.write(text)
-    def write_opt(self, text):
-        with open(self.log_name_opt, 'a+') as file:
-            file.write(text)
-    def clean(self):
-        with open(self.log_name_main, 'w') as file:
-            file.write("")
-        with open(self.log_name_opt, 'w') as file:
-            file.write("")
+explore_time = 5120
+limit_step = 1000 #max steps per episode
+limit_eval = 1000 #max steps per evaluation
+num_episodes = 1000000
+start_episode = 1 #number for the identification of the current episode
+episode_rewards_all, episode_steps_all, test_rewards, Q_learning, average_steps = [], [], [], False, 0
+terminal_reward = False
 
 
-numbers = extract_r1_r2_r3()
-if numbers != None:
-    # derive random numbers from history file
-    r1, r2, r3 = numbers
-else:
-    # generate new random seeds
-    r1, r2, r3 = random.randint(0,5), random.randint(0,5), random.randint(0,5)
 
-torch.manual_seed(r1)
-np.random.seed(r2)
-random.seed(r3)
 
-print(r1, ", ", r2, ", ", r3)
+if option == -1:
+    env = gym.make('Pendulum-v1', render_mode="human")
+    env_test = gym.make('Pendulum-v1')
 
-log_name_main = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
-log_name_opt = "episodes_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".log"
-log_file = LogFile(log_name_main, log_name_opt)
+elif option == 0:
+    env = gym.make('MountainCarContinuous-v0')
+    env_test = gym.make('MountainCarContinuous-v0')
+
+elif option == 1:
+    env = gym.make('HalfCheetah-v4', render_mode="human")
+    env_test = gym.make('HalfCheetah-v4')
+
+elif option == 2:
+    env = gym.make('Walker2d-v4')
+    env_test = gym.make('Walker2d-v4')
+
+elif option == 3:
+    env = gym.make('Humanoid-v4')
+    env_test = gym.make('Humanoid-v4')
+
+elif option == 4:
+    limit_step = 300
+    limit_eval = 300
+    env = gym.make('HumanoidStandup-v4')
+    env_test = gym.make('HumanoidStandup-v4')
+
+elif option == 5:
+    env = gym.make('Ant-v4', render_mode="human")
+    env_test = gym.make('Ant-v4')
+
+
+elif option == 6:
+    env = gym.make('BipedalWalker-v3', render_mode="human")
+    env_test = gym.make('BipedalWalker-v3')
+    terminal_reward = True
+
+elif option == 7:
+    env = gym.make('BipedalWalkerHardcore-v3')
+    env_test = gym.make('BipedalWalkerHardcore-v3')
+    terminal_reward = True
+
+elif option == 8:
+    env = gym.make('LunarLanderContinuous-v2')
+    env_test = gym.make('LunarLanderContinuous-v2')
+    terminal_reward = True
+
+elif option == 9:
+    limit_step = 300
+    limit_eval = 200
+    env = gym.make('Pusher-v4')
+    env_test = gym.make('Pusher-v4')
+
+elif option == 10:
+    burst = True
+    env = gym.make('Swimmer-v4')
+    env_test = gym.make('Swimmer-v4')
+
+elif option == 11:
+    env = gym.make('Hopper-v4')
+    env_test = gym.make('Hopper-v4')
+
+
+state_dim = env.observation_space.shape[0]
+action_dim= env.action_space.shape[0]
+
+print('action space high', env.action_space.high)
+max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else 1.0
+
+algo = Symphony(state_dim, action_dim, device, max_action)
+
 
 
 
 
 #==============================================================================================
 #==============================================================================================
-#=========================================SYMPHONY=============================================
+#==========================================RECOVERY===========================================
+#==============================================================================================
+#==============================================================================================
+
+def hard_recovery(algo, replay_buffer, size):
+    algo.replay_buffer.states[:size] = replay_buffer.states[:size]
+    algo.replay_buffer.actions[:size] = replay_buffer.actions[:size]
+    algo.replay_buffer.rewards[:size] = replay_buffer.rewards[:size]
+    algo.replay_buffer.next_states[:size] = replay_buffer.next_states[:size]
+    algo.replay_buffer.dones[:size] = replay_buffer.dones[:size]
+    algo.replay_buffer.length = len(replay_buffer.indices)
+
+
+
+
+#==============================================================================================
+#==============================================================================================
+#==========================================TESTING=============================================
+#==============================================================================================
+#==============================================================================================
+
+#testing model
+def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
+    if test_episodes<1: return
+    print("Validation... ", test_episodes, " epsodes")
+    episode_return = []
+
+    for test_episode in range(test_episodes):
+
+        state = env.reset()[0]
+        rewards = []
+
+        for steps in range(1,limit_step+1):
+
+            r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+            torch.manual_seed(r1)
+            np.random.seed(r2)
+            random.seed(r3)
+
+            action = algo.select_action(state)
+            next_state, reward, done, truncated, info = env.step(action)
+            rewards.append(reward)
+            state = next_state
+
+            if done or truncated: break
+
+        episode_return.append(np.sum(rewards))
+
+        validate_return = np.mean(episode_return[-100:])
+        print(f"trial {test_episode+1}:, Rtrn = {episode_return[test_episode]:.2f}, Average 100 = {validate_return:.2f}, steps: {steps}")
+
+    if save_log: log_file.write(str(current_step) + " : " + str(round(validate_return.item(), 2)) + "\n")
+
+
+#==============================================================================================
+#==============================================================================================
+#=====================LOADING EXISTING MODELS, BUFFER and PARAMETERS===========================
 #==============================================================================================
 #==============================================================================================
 
 
-class RMSprop(optim.Optimizer):
-    def __init__(self, params, lr=1e-3):
-        if not 0.0 <= lr:
-            raise ValueError(f"Invalid learning rate: {lr}")
+total_steps = 0
 
-        
-        defaults = dict(lr=lr)
-        super().__init__(params, defaults)
-    
-    @torch.no_grad()
-    def step(self):
-        for group in self.param_groups:
-            lr = group['lr']
-            
-            for p in group['params']:
-                if p.grad is None:
-                    continue
+try:
+    print("loading buffer...")
+    with open('data', 'rb') as file:
+        dict = pickle.load(file)
+        algo.replay_buffer = dict['buffer']
+        #hard_recovery(algo, dict['buffer'], 200000+20000) # comment the previous line and chose a memory size to recover from old buffer
+        algo.q_next_ema = dict['q_next_ema']
+        episode_rewards_all = dict['episode_rewards_all']
+        episode_steps_all = dict['episode_steps_all']
+        total_steps = dict['total_steps']
+        average_steps = dict['average_steps']
+        if len(algo.replay_buffer)>=explore_time and not Q_learning: Q_learning = True
+    print('buffer loaded, buffer length', len(algo.replay_buffer))
 
-                
-                state = self.state[p]
-                if len(state) == 0:
-                    state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['step'] = 0.0
-                    
-                    
-                v = state['v']
-                state['step'] += 1
+    start_episode = len(episode_steps_all)
 
-                grad = p.grad
-                exp = 1.0 - 0.99999**state['step']
-                alpha = min(0.9+0.1*exp, 0.99999)
-                #alpha = 0.9
-
-                
-                # Update denominator
-                v.mul_(alpha).addcmul_(grad, grad, value=1.0 - alpha)
-
-                update = grad / (v.sqrt() + 1e-8)
-                p.add_(update, alpha=-lr)
-                
-        return
+except:
+    print("problem during loading buffer")
 
 
-#Rectified Huber Symmetric Error Loss Function via JIT Module
-# nn.Module -> JIT C++ graph
-class ReHSE(jit.ScriptModule):
-    def __init__(self):
-        super(ReHSE, self).__init__()
+try:
+    print("loading models...")
+    algo.nets.load_state_dict(torch.load('nets_model.pt', weights_only=True))
+    algo.nets_target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
+    #algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt'))
+    print('models loaded')
+    #testing(env_test, limit_eval, 10)
+except:
+    print("problem during loading models")
 
-    @jit.script_method
-    def forward(self, e):
-        return (e * torch.tanh(e/2)).mean()
 
 
-#Rectified Huber Asymmetric Error Loss Function via JIT Module
-# nn.Module -> JIT C++ graph
-class ReHAE(jit.ScriptModule):
-    def __init__(self):
-        super(ReHAE, self).__init__()
 
-    @jit.script_method
-    def forward(self, e):
-        return (torch.abs(e) * torch.tanh(e/2)).mean()
+#==============================================================================================
+#==============================================================================================
+#========================================EXPLORATION===========================================
+#==============================================================================================
+#==============================================================================================
+
+
+
+if not Q_learning:
+    log_file.clean()
     
 
+    while not Q_learning:
+        rewards = []
+        state = env_test.reset()[0]
 
-#ReSine Activation Function
-# nn.Module -> JIT C++ graph
-class ReSine(jit.ScriptModule):
-    def __init__(self, hidden_dim=256):
-        super(ReSine, self).__init__()
-        self.s = nn.Parameter(data=2.0*torch.rand(hidden_dim)-1.0, requires_grad=True)
+        for steps in range(1, limit_step+1):
 
-    @jit.script_method
-    def forward(self, x):
-        s = torch.sigmoid(self.s)
-        x = s*torch.sin(x/s)
-        return x/(1+torch.exp(-1.5*x/s))
+            r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
+            torch.manual_seed(r1)
+            np.random.seed(r2)
+            random.seed(r3)
 
 
+            action = algo.select_action(state, explore=True)
+            next_state, reward, done, truncated, info = env_test.step(action)
+            rewards.append(reward)
+            if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
+            algo.replay_buffer.add(state, action, reward, next_state, done)
+            if done: break
+            state = next_state
+        Return = np.sum(rewards)
+        print(f" Rtrn = {Return:.2f}")
 
-#Linear Layer followed by Silent Dropout
-# nn.Module -> JIT C++ graph
-class LinearSDropout(jit.ScriptModule):
-    def __init__(self, f_in, f_out=False):
-        super(LinearSDropout, self).__init__()
-        self.ffw = nn.Linear(f_in, f_out)
-
-    @jit.script_method
-    def forward(self, x):
-        x = self.ffw(x)
-        #Silent Dropout function created with the help of ChatGPT
-        # It is not recommended to use JIT compilation decorator with online random generator as Symphony updates seeds each time
-        # We did exception only for this module as it is used inside neural networks.
-        mask = (torch.rand_like(x) > 0.5).float()
-        return  mask * x + (1.0-mask) * x.detach()
+    algo.replay_buffer.fill(5*explore_time)
 
 
 
-
-#Shared Feed Forward Module
-# nn.Module -> JIT C++ graph
-class FeedForward(jit.ScriptModule):
-    def __init__(self, f_in, f_out):
-        super(FeedForward, self).__init__()
-
-        self.ffw = nn.Sequential(
-            nn.Linear(f_in, 512),
-            nn.LayerNorm(512),
-            nn.Linear(512, 384),
-            ReSine(384),
-            LinearSDropout(384, 384),
-            LinearSDropout(384, f_out)
-        )
+#==============================================================================================
+#==============================================================================================
+#=========================================TRAINING=============================================
+#==============================================================================================
+#==============================================================================================
 
 
-    @jit.script_method
-    def forward(self, x):
-        return self.ffw(x)
-
-# nn.Module -> JIT C++ graph
-   
-
-# nn.Module -> JIT C++ graph
-class ActorCritic(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, max_action=1.0):
-        super().__init__()
-
-        self.action_dim = action_dim
+print("started training")
+#print(f"ReSine scale:\n {algo.actor.ffw[0].ffw[3].scale.cpu().detach().numpy()}")
 
 
+for i in range(start_episode, num_episodes):
 
-        self.a = FeedForward(state_dim, 2*action_dim)
-        self.a_max = nn.Parameter(data= max_action, requires_grad=False)
-        self.noise_std = nn.Parameter(data= math.sqrt(0.05) * max_action, requires_grad=False)
-        self.eps = nn.Parameter(data=torch.zeros(1), requires_grad=False)
-        
-        
-        self.qA = FeedForward(state_dim+action_dim, 256)
-        self.qB = FeedForward(state_dim+action_dim, 256)
-        self.qC = FeedForward(state_dim+action_dim, 256)
+    rewards = []
+    state = env.reset()[0]
+    episode_steps = 0
 
-        self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
+    #----------------------------pre-processing------------------------------
 
+    #--------------------2. CPU/GPU cooling ------------------
+    #time.sleep(0.3)
 
-        
+    for steps in range(1, limit_step+1):
 
-
-
-    #========= Actor Forward Pass =========
-    @jit.script_method
-    def actor(self, state):
-        ab = self.a(state).reshape(-1, 2, self.action_dim)
-        ab_ = torch.tanh(ab/2)
-        a, a_, beta = ab[:,0], ab_[:,0], ab_[:,1].abs()
-        a_out =  a_ + self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)
-        return self.a_max*torch.tanh(a_out/self.a_max), (beta*a*a_).mean()
-
-
-    #========= Critic Forward Pass =========
-    # take 3 distributions and concatenate them
-    @jit.script_method
-    def critic(self, state, action):
-        x = torch.cat([state, action], -1)
-        return torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
-
-
-
-    # take average in between min and mean
-    #@jit.script_method
-    def critic_soft(self, state, action):
-        q = self.critic(state, action)
-        q = 0.5 * (q.min(dim=-1, keepdim=True)[0] + q.mean(dim=-1, keepdim=True))
-        return q, q.detach()
-
-
-
-
-# Define the algorithm
-class Symphony(object):
-    def __init__(self, state_dim, action_dim, device, max_action=1.0):
-
-        self.tau = 0.005
-
-        self.tau_ = 1.0 - self.tau
-        self.learning_rate = 3e-4
-        self.state_dim = state_dim
-        self.action_dim = action_dim
-        self.max_action = max_action
-        self.device = device
-        
-        self.utd = 5
-        self.k = 1/self.utd
-
-        self.q_next_ema = 0.0
-
-
-        self.replay_buffer = ReplayBuffer(state_dim, action_dim, device)
-
-        self.nets = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
-        self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
-        self.nets_target.load_state_dict(self.nets.state_dict())
-
-
-        self.nets_optimizer = RMSprop(self.nets.parameters(), lr=self.learning_rate)
-
-
-        self.rehse = ReHSE()
-        self.rehae = ReHAE()
-
-        self.scaler = torch.cuda.amp.GradScaler()
-
-
-    
-    def select_action(self, state, explore=False):
-        if explore: return self.max_action.numpy()*np.random.uniform(-0.5, 0.75, size=self.action_dim)
-        state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
-        with torch.no_grad(): action = self.nets.actor(state)[0]
-        return action.cpu().data.numpy().flatten()
-
-    """
-    def select_action(self, state, mean=False, explore=False):
-        if explore: return self.max_action*torch.FloatTensor(self.action_dim).uniform_(-0.5, 0.75).to(device)
-        with torch.no_grad(): action = self.nets.actor(state)[0]
-        return action
-    """
-    
-
-
-    def train(self):
-        # decreases dependence on random seeds:
         r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
         torch.manual_seed(r1)
         np.random.seed(r2)
         random.seed(r3)
 
-        for _ in range(self.utd): self.update()
 
+        episode_steps += 1
+        total_steps += 1
 
-
-    def update(self):
-
-
-        state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample()
-        self.nets_optimizer.zero_grad(set_to_none=True)
-
-
-        with torch.no_grad():
-            for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
-                target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
-
-
-        next_action, next_s2 = self.nets.actor(next_state)
-        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
-        q_target =  self.replay_buffer.r_scale * reward + not_done_gamma  * q_next_target_value 
-        q_pred = self.nets.critic(state, action)
-
-
-        q_next_ema = 0.9 * self.q_next_ema + 0.1 * q_next_target_value
-        #if self.q_next_ema !=0: self.q_next_ema = q_next_target_value
-        nets_loss = -self.rehae(q_next_target-q_next_ema) + self.rehse(q_pred-q_target) + next_s2
-
-        (self.k * nets_loss).backward()
-        self.nets_optimizer.step()
-        self.q_next_ema =  q_next_ema.mean()#q_next_target_value.mean()
-
-
-
-class ReplayBuffer:
-    def __init__(self, state_dim, action_dim, device):
-
-        self.capacity, self.length, self.device = 102400, 0, device
-        self.batch_size = 320
-
-        self.indexes = np.arange(0, self.capacity, 1)
-        self.probs = self.fade(self.indexes/self.capacity)
-
-        self.random = np.random.default_rng()
-
-        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
-        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
-        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
-        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
-        self.not_dones_gamma = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
-
-
-        self.action_dim = action_dim
-
-
-    #Normalized index conversion into fading probabilities
-    def fade(self, norm_index):
-        weights = np.tanh(7*norm_index**3) # linear / -> non-linear _/вЂѕ
-        return weights/np.sum(weights) #probabilities
-
-
-    def norm_Q(self, interval):
-        Q = torch.sum(torch.abs(self.rewards[self.length-interval:interval]))/interval
-        return Q.item()
-
-    def fill(self):
-        self.r_scale = 0.01 / self.norm_Q(self.lenstm)
-        
-        print("reward scale factor", self.r_scale)
-
-        print("copying replay data, current length", self.length)
-
-        def repeat(tensor, times):
-            temp = tensor[:self.length]
-            return temp.repeat(times, 1)
-
-        times = self.capacity//self.length
-        self.temp_length = times*self.length
-        
-
-
-        self.states[:self.temp_length] = repeat(self.states, times)
-        self.actions[:self.temp_length] = repeat(self.actions, times)
-        self.rewards[:self.temp_length] = repeat(self.rewards, times)
-        self.next_states[:self.temp_length] = repeat(self.next_states, times)
-        self.not_dones_gamma[:self.temp_length] = repeat(self.not_dones_gamma, times)
-
-        self.left = self.capacity - self.temp_length
-
-        if self.left>0:
-
-            self.states[-self.left:] = self.states[:self.left]
-            self.actions[-self.left:] = self.actions[:self.left]
-            self.rewards[-self.left:] = self.rewards[:self.left]
-            self.next_states[-self.left:] = self.next_states[:self.left]
-            self.not_dones_gamma[-self.left:] = self.not_dones_gamma[:self.left]
-
-
-        self.length = self.temp_length + self.left
-        print("new replay buffer length: ", self.length)
-
-        
-
-        
-
-        
-
-
-
-
-    def add(self, state, action, reward, next_state, done):
-
-        if self.length<self.capacity:
-            self.length += 1
-            self.lenstm = self.length
+        # save models, data
+        if (total_steps>=1250 and total_steps%1250==0):
+            part = ""
+            #part = "_"+str(total_steps/1000) if total_steps%300000==0 else ""
+            testing(env_test, limit_step=limit_eval, test_episodes=50, current_step=total_steps, save_log=True)
+            torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
+            torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
+            #torch.save(algo.nets_optimizer.state_dict(), "nets_optimizer.pt")
+            with open('data'+ part, 'wb') as file:
+                pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
             
-        idx = self.length-1
-        
-        self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
-        self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
-        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
-        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
-        self.not_dones_gamma[idx,:] = 0.99 * (1.0 - torch.tensor([done], dtype=torch.float32, device=self.device))
 
-        
-        if done: self.rewards[idx,:] += self.norm_Q(self.lenstm)
+ 
+        action = algo.select_action(state)
+        next_state, reward, done, truncated, info = env.step(action)
+        rewards.append(reward)
+        algo.replay_buffer.add(state, action, reward, next_state, done)
+        algo.train()
+        if done: break
+        state = next_state
 
-                
-        if self.length>=self.capacity:
-            self.lenstm = int(0.2*self.capacity)
-            self.states = torch.roll(self.states, shifts=-1, dims=0)
-            self.actions = torch.roll(self.actions, shifts=-1, dims=0)
-            self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
-            self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
-            self.not_dones_gamma = torch.roll(self.not_dones_gamma, shifts=-1, dims=0)
+    episode_rewards_all.append(np.sum(rewards))
+    average_reward = np.mean(episode_rewards_all[-100:])
+
+    episode_steps_all.append(episode_steps)
+    average_steps = np.mean(episode_steps_all[-100:])
 
 
 
+    print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {episode_steps} | total_steps = {total_steps}")
 
-
-
-   
-    # Do not use any decorators with random generators (Symphony updates seed each time)
-    def sample(self):
-        indices = self.random.choice(self.indexes, p=self.probs, size=self.batch_size)
-
-        return (
-            self.states[indices],
-            self.actions[indices],
-            self.rewards[indices],
-            self.next_states[indices],
-            self.not_dones_gamma[indices]
-        )
-
-
-    def __len__(self):
-        return self.length
+    log_file.write_opt(str(i) + " : " + str(round(episode_rewards_all[-1], 2)) + " : step : " + str(total_steps) + "\n")
