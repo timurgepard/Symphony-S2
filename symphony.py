@@ -319,23 +319,24 @@ class Symphony(object):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
     
 
-        with torch.cuda.amp.autocast(dtype=torch.float16):
-            next_action, next_s2 = self.nets.actor(next_state)
-            q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
-            q_target =  self.replay_buffer.r_scale * reward  + not_done_gamma * q_next_target_value
-            q_pred = self.nets.critic(state, action)
+        #with torch.cuda.amp.autocast(dtype=torch.float32):
+        next_action, next_s2 = self.nets.actor(next_state)
+        q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
+        q_target =  self.replay_buffer.r_scale * reward  + not_done_gamma * q_next_target_value
+        q_pred = self.nets.critic(state, action)
 
-            q_next_ema = 0.618 * self.q_next_ema + 0.382 * q_next_target_value
-            nets_loss = -self.rehae(q_next_target - q_next_ema) + self.rehse(q_pred-q_target) + self.tau * next_s2.mean()
-            nets_loss = self.k * nets_loss
+        q_next_ema = 0.618 * self.q_next_ema + 0.382 * q_next_target_value
+        nets_loss = -self.rehae(q_next_target - q_next_ema) + self.rehse(q_pred-q_target) + self.tau * next_s2.mean()
+        nets_loss = self.k * nets_loss
 
-
+        """
         self.scaler.scale(nets_loss).backward()
         self.scaler.step(self.nets_optimizer)
         self.scaler.update()
+        """
 
-        #nets_loss.backward()
-        #self.nets_optimizer.step()
+        nets_loss.backward()
+        self.nets_optimizer.step()
         self.q_next_ema =  q_next_ema.detach().mean()
 
 
@@ -353,11 +354,11 @@ class ReplayBuffer:
 
         self.random = np.random.default_rng()
 
-        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float16, device=device)
-        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float16, device=device)
-        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float16, device=device)
-        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float16, device=device)
-        self.not_dones_gamma = torch.zeros((self.capacity, 1), dtype=torch.float16, device=device)
+        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
+        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
+        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
+        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
+        self.not_dones_gamma = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
 
 
 
@@ -371,11 +372,11 @@ class ReplayBuffer:
 
         idx = self.length-1
         
-        self.states[idx,:] = torch.tensor(state, dtype=torch.float16, device=self.device)
-        self.actions[idx,:] = torch.tensor(action, dtype=torch.float16, device=self.device)
-        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float16, device=self.device)
-        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float16, device=self.device)
-        self.not_dones_gamma[idx,:] = 0.99 * (1.0 - torch.tensor([done], dtype=torch.float16, device=self.device))
+        self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
+        self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
+        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
+        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
+        self.not_dones_gamma[idx,:] = 0.99 * (1.0 - torch.tensor([done], dtype=torch.float32, device=self.device))
 
 
         if self.length>=self.capacity:
