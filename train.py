@@ -120,7 +120,9 @@ def hard_recovery(algo, replay_buffer, size):
     algo.replay_buffer.actions[:size] = replay_buffer.actions[:size]
     algo.replay_buffer.rewards[:size] = replay_buffer.rewards[:size]
     algo.replay_buffer.next_states[:size] = replay_buffer.next_states[:size]
-    algo.replay_buffer.dones[:size] = replay_buffer.dones[:size]
+    algo.replay_buffer.not_dones_gamma[:size] = replay_buffer.not_dones_gamma[:size]
+    algo.replay_buffer.r_scale = replay_buffer.r_scale
+    algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
     algo.replay_buffer.length = len(replay_buffer.indices)
 
 
@@ -179,7 +181,7 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        #hard_recovery(algo, dict['buffer'], 200000+20000) # comment the previous line and chose a memory size to recover from old buffer
+        #hard_recovery(algo, dict['buffer'], 600000) # comment the previous line and chose a memory size to recover from old buffer
         algo.q_next_ema = dict['q_next_ema']
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
@@ -222,8 +224,11 @@ if not Q_learning:
     while not Q_learning:
         rewards = []
         state = env_test.reset()[0]
+        episode_steps = 0
 
         for steps in range(1, limit_step+1):
+
+            episode_steps +=1
 
             r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
             torch.manual_seed(r1)
@@ -234,14 +239,20 @@ if not Q_learning:
             action = algo.select_action(state, explore=True)
             next_state, reward, done, truncated, info = env_test.step(action)
             rewards.append(reward)
+            if done and abs(reward)%100==0: reward = reward/50
             if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
             algo.replay_buffer.add(state, action, reward, next_state, done)
             if done: break
             state = next_state
+
+        episode_rewards_all.append(np.sum(rewards))
+
+        episode_steps_all.append(episode_steps)
+        average_steps = np.mean(episode_steps_all)
+
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
 
-    algo.replay_buffer.fill(5*explore_time)
 
 
 
@@ -251,6 +262,7 @@ if not Q_learning:
 #==============================================================================================
 #==============================================================================================
 
+stop = average_steps
 
 print("started training")
 #print(f"ReSine scale:\n {algo.actor.ffw[0].ffw[3].scale.cpu().detach().numpy()}")
@@ -283,7 +295,7 @@ for i in range(start_episode, num_episodes):
             part = ""
             #part = "_"+str(total_steps/1000) if total_steps%300000==0 else ""
             testing(env_test, limit_step=limit_eval, test_episodes=50, current_step=total_steps, save_log=True)
-            if total_steps%5000==0:
+            if total_steps%100000==0:
                 print("saving data...")
                 torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
                 torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
@@ -292,21 +304,18 @@ for i in range(start_episode, num_episodes):
                     pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
                 print("...saved")
 
- 
+
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
+        if done and abs(reward)%100==0: reward = reward/50
         algo.replay_buffer.add(state, action, reward, next_state, done)
         algo.train()
         if done: break
         state = next_state
 
     episode_rewards_all.append(np.sum(rewards))
-    average_reward = np.mean(episode_rewards_all[-100:])
-
     episode_steps_all.append(episode_steps)
-    average_steps = np.mean(episode_steps_all[-100:])
-
 
 
     print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {episode_steps} | total_steps = {total_steps}")
