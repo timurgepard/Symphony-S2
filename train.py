@@ -254,8 +254,6 @@ if not Q_learning:
         print(f" Rtrn = {Return:.2f}")
 
 
-
-
 #==============================================================================================
 #==============================================================================================
 #=========================================TRAINING=============================================
@@ -280,6 +278,8 @@ for i in range(start_episode, num_episodes):
     #time.sleep(0.3)
 
     for steps in range(1, limit_step+1):
+
+        algo.train()
 
         r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
         torch.manual_seed(r1)
@@ -310,7 +310,6 @@ for i in range(start_episode, num_episodes):
         rewards.append(reward)
         if done and abs(reward)%100==0: reward = reward/50
         algo.replay_buffer.add(state, action, reward, next_state, done)
-        algo.train()
         if done: break
         state = next_state
 
