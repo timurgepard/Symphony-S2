@@ -307,7 +307,7 @@ class Symphony(object):
         np.random.seed(r2)
         random.seed(r3)
 
-        if self.eta==0.0: self.eta = self.replay_buffer.fill(60)
+        if self.eta==0.0: self.eta = self.replay_buffer.fill(40)
         for i in range(self.utd): self.update()
         
 
@@ -321,9 +321,8 @@ class Symphony(object):
             for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
 
-        #with torch.cuda.amp.autocast(dtype=torch.float32):
+
         next_action, next_s2 = self.nets.actor(next_state)
-        #next_action = self.nets.actor(next_state)
         q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
         q_target =  self.eta * reward  + not_done_gamma * q_next_target_value
         q_pred = self.nets.critic(state, action)
@@ -346,7 +345,7 @@ class Symphony(object):
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device):
 
-        self.capacity, self.length, self.device = 307200, 0, device
+        self.capacity, self.length, self.device = 204800, 0, device
 
         self.random = np.random.default_rng()
         self.indices = []
