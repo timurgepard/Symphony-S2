@@ -222,17 +222,14 @@ class ActorCritic(jit.ScriptModule):
         ab = self.a(state).reshape(-1, 2, self.action_dim)
         ab_ = torch.tanh(ab/2)
         a_, s, s_ = ab_[:, 0], ab[:, 1], self.a_max * (ab_[:, 1] + 1.0)/2
-        a_out = s_*torch.tanh(a_/s_) + self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)
+        a_out = s_* torch.tanh(a_/s_) + self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)
         return a_out, (s*s_)/(2*math.e)
-        #a_out =  a_ + self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)
-        #return self.a_max*torch.tanh(a_out/self.a_max), (a*a_)/(2*math.e)
 
 
     #========= Critic Forward Pass =========
     # take 3 distributions and concatenate them
     @jit.script_method
     def critic(self, state, action):
-        #self.eps += 0.0001
         x = torch.cat([state, action], -1)
         return torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
 
@@ -263,10 +260,8 @@ class Symphony(object):
         self.device = device
         
         self.utd = 3
-        self.k = 1/self.utd
-
         self.q_next_ema = 0.0
-
+        self.eta = 0.0
 
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device)
 
@@ -274,15 +269,12 @@ class Symphony(object):
         self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
         self.nets_target.load_state_dict(self.nets.state_dict())
 
-
         self.nets_optimizer = RMSprop(self.nets.parameters(), lr=self.learning_rate)
-
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
 
-        self.scaler = torch.cuda.amp.GradScaler()
-        self.eta = 0.0
+        
 
 
     
@@ -307,7 +299,8 @@ class Symphony(object):
         np.random.seed(r2)
         random.seed(r3)
 
-        if self.eta==0.0: self.eta = self.replay_buffer.fill(40)
+        if self.replay_buffer.eta==0.0: self.replay_buffer.fill(5)
+        #if self.replay_buffer.length==self.replay_buffer.capacity: self.utd = 4
         for i in range(self.utd): self.update()
         
 
@@ -324,15 +317,13 @@ class Symphony(object):
 
         next_action, next_s2 = self.nets.actor(next_state)
         q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
-        q_target =  self.eta * reward  + not_done_gamma * q_next_target_value
+        q_target =  self.replay_buffer.eta * reward  + not_done_gamma * q_next_target_value
         q_pred = self.nets.critic(state, action)
 
-        q_next_ema = 0.618 * self.q_next_ema + 0.382 * q_next_target_value
-        nets_loss = -self.rehae(q_next_target - q_next_ema) + self.rehse(q_pred-q_target) + next_s2.mean()
+        nets_loss = -q_next_target.mean() + self.rehse(q_pred-q_target) + next_s2.mean()
         
         nets_loss.backward()
         self.nets_optimizer.step()
-        self.q_next_ema =  q_next_ema.mean()
 
 
 
@@ -345,11 +336,12 @@ class Symphony(object):
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device):
 
-        self.capacity, self.length, self.device = 204800, 0, device
+        self.capacity, self.length, self.device = 1024000, 0, device
 
         self.random = np.random.default_rng()
         self.indices = []
-        self.batch_size = 384
+        self.eta = 0.0
+        self.batch_size = 256
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
@@ -363,7 +355,7 @@ class ReplayBuffer:
 
         if self.length<self.capacity:
             self.length += 1
-            #self.batch_size = 128 + min(self.length//800, 384)
+            #self.batch_size = 128 + min(self.length//800, 768)
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length)
@@ -424,7 +416,7 @@ class ReplayBuffer:
     def fill(self, times):
 
 
-        self.r_scale = 0.01/self.norm_Q()
+        self.eta = 0.01/self.norm_Q()
 
         print("copying replay data, current length", self.length)
 
@@ -447,5 +439,3 @@ class ReplayBuffer:
         self.probs = self.fade(self.indexes/self.length)
 
         print("new replay buffer length: ", self.length)
-
-        return self.r_scale
