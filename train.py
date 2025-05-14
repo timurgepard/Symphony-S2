@@ -6,7 +6,7 @@ import gymnasium as gym
 import random
 import pickle
 import time
-from symphony import Symphony, log_file
+from symphonyS2 import Symphony, log_file
 
 
 
@@ -62,7 +62,7 @@ elif option == 4:
     env_test = gym.make('HumanoidStandup-v4')
 
 elif option == 5:
-    env = gym.make('Ant-v4', render_mode="human")
+    env = gym.make('Ant-v4')
     env_test = gym.make('Ant-v4')
 
 
@@ -121,9 +121,11 @@ def hard_recovery(algo, replay_buffer, size):
     algo.replay_buffer.rewards[:size] = replay_buffer.rewards[:size]
     algo.replay_buffer.next_states[:size] = replay_buffer.next_states[:size]
     algo.replay_buffer.not_dones_gamma[:size] = replay_buffer.not_dones_gamma[:size]
-    algo.replay_buffer.r_scale = replay_buffer.r_scale
+    algo.replay_buffer.eta = replay_buffer.eta
     algo.replay_buffer.indices[:size] = replay_buffer.indices[:size]
+    algo.replay_buffer.indexes = np.array(replay_buffer.indices)
     algo.replay_buffer.length = len(replay_buffer.indices)
+    algo.replay_buffer.probs = algo.replay_buffer.fade(algo.replay_buffer.indexes/algo.replay_buffer.length)
 
 
 
@@ -176,12 +178,12 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
 
 total_steps = 0
 
+
 try:
     print("loading buffer...")
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        #hard_recovery(algo, dict['buffer'], 600000) # comment the previous line and chose a memory size to recover from old buffer
         algo.q_next_ema = dict['q_next_ema']
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
@@ -200,9 +202,8 @@ try:
     print("loading models...")
     algo.nets.load_state_dict(torch.load('nets_model.pt', weights_only=True))
     algo.nets_target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
-    #algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt'))
     print('models loaded')
-    #testing(env_test, limit_eval, 10)
+    #testing(env_test, limit_eval, 100)
 except:
     print("problem during loading models")
 
@@ -239,16 +240,11 @@ if not Q_learning:
             action = algo.select_action(state, explore=True)
             next_state, reward, done, truncated, info = env_test.step(action)
             rewards.append(reward)
-            if done and abs(reward)%100==0: reward = reward/50
+            #if done and abs(reward)%100==0: reward = reward/50
             if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
             algo.replay_buffer.add(state, action, reward, next_state, done)
             if done: break
             state = next_state
-
-        episode_rewards_all.append(np.sum(rewards))
-
-        episode_steps_all.append(episode_steps)
-        average_steps = np.mean(episode_steps_all)
 
         Return = np.sum(rewards)
         print(f" Rtrn = {Return:.2f}")
@@ -275,7 +271,7 @@ for i in range(start_episode, num_episodes):
     #----------------------------pre-processing------------------------------
 
     #--------------------2. CPU/GPU cooling ------------------
-    #time.sleep(0.3)
+    time.sleep(0.3)
 
     for steps in range(1, limit_step+1):
 
@@ -295,11 +291,10 @@ for i in range(start_episode, num_episodes):
             part = ""
             #part = "_"+str(total_steps/1000) if total_steps%300000==0 else ""
             testing(env_test, limit_step=limit_eval, test_episodes=50, current_step=total_steps, save_log=True)
-            if total_steps%100000==0:
+            if total_steps%5000==0:
                 print("saving data...")
                 torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
                 torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
-                #torch.save(algo.nets_optimizer.state_dict(), "nets_optimizer.pt")
                 with open('data'+ part, 'wb') as file:
                     pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
                 print("...saved")
@@ -308,7 +303,7 @@ for i in range(start_episode, num_episodes):
         action = algo.select_action(state)
         next_state, reward, done, truncated, info = env.step(action)
         rewards.append(reward)
-        if done and abs(reward)%100==0: reward = reward/50
+        #if done and abs(reward)%100==0: reward = reward/50
         algo.replay_buffer.add(state, action, reward, next_state, done)
         if done: break
         state = next_state
