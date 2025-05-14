@@ -77,40 +77,62 @@ log_file = LogFile(log_name_main, log_name_opt)
 #==============================================================================================
 
 
-class RMSprop(optim.Optimizer):
-    def __init__(self, params, lr=1e-3, alpha=0.99):
-        if not 0.0 <= lr:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        if not 0.0 <= alpha:
-            raise ValueError(f"Invalid learning rate: {alpha}")
-        
-        defaults = dict(lr=lr, alpha=alpha)
+class SGD(optim.Optimizer):
+    def __init__(self, params, lr=1e-3):
+        defaults = dict(lr=lr)
         super().__init__(params, defaults)
-
         self.lr = lr
-        self.alpha = alpha
-        self.alpha_ = 1-alpha
-    
+
+
     @torch.no_grad()
     def step(self):
         for group in self.param_groups:
-            
             for p in group['params']:
                 if p.grad is None:
                     continue
 
-                
-                state = self.state[p]
-                if len(state) == 0: state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                p.add_(p.grad, alpha=-self.lr)
 
-                v = state['v']
+
+class Adam(optim.Optimizer):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999)):
+        defaults = dict(lr=lr, betas=betas)
+        super().__init__(params, defaults)
+        self.lr = lr
+        self.beta1, self.beta2 = betas
+        self.beta1_, self.beta2_ = 1-self.beta1, 1-self.beta2
+        self.eps = 1e-8  # You can make this configurable if needed
+        self.step_count = 0
+
+    @torch.no_grad()
+    def step(self):
+        self.step_count += 1
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
 
                 grad = p.grad
 
-                # Update denominator
-                v.mul_(self.alpha).addcmul_(grad, grad, value=(1-self.alpha))
+                state = self.state[p]
+                if len(state) == 0:
+                    state['m'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                p.addcdiv_(grad, v.sqrt() + 1e-8, value=-self.lr)
+                m = state['m']
+                v = state['v']
+
+                # Update biased first moment estimate
+                m.mul_(self.beta1).add_(grad, alpha=self.beta1_)
+                # Update biased second raw moment estimate
+                v.mul_(self.beta2).addcmul_(grad, grad, value=self.beta2_)
+
+                # Compute bias-corrected estimates
+                m_hat = m / (1 - self.beta1 ** self.step_count)
+                v_hat = v / (1 - self.beta2 ** self.step_count)
+
+                # Update parameters
+                p.addcdiv_(m_hat, v_hat.sqrt() + self.eps, value=-self.lr)
 
 
 
@@ -152,25 +174,22 @@ class ReSine(jit.ScriptModule):
 
 
 
-#Linear Layer followed by Silent Dropout
+#Silent Dropout function created with the help of ChatGPT
 # nn.Module -> JIT C++ graph
-class LinearSDropout(jit.ScriptModule):
-    def __init__(self, f_in, f_out=False, p=0.5):
-        super(LinearSDropout, self).__init__()
-        self.ffw = nn.Linear(f_in, f_out)
+class SilentDropout(jit.ScriptModule):
+    def __init__(self, p=0.5):
+        super(SilentDropout, self).__init__()
+        self.p = p
+
 
     @jit.script_method
     def forward(self, x):
-        x = self.ffw(x)
-        #Silent Dropout function created with the help of ChatGPT
-        # It is not recommended to use JIT compilation decorator with online random generator as Symphony updates seeds each time
-        # We did exception only for this module as it is used inside neural networks.
-        mask = (torch.rand_like(x) > 0.5).float()
+        mask = (torch.rand_like(x) > self.p).float()
         return  mask * x + (1.0-mask) * x.detach()
 
 
-#Shared Feed Forward Module
-# nn.Module -> JIT C++ graph
+
+
 class FeedForward(jit.ScriptModule):
     def __init__(self, f_in, f_out):
         super(FeedForward, self).__init__()
@@ -180,7 +199,8 @@ class FeedForward(jit.ScriptModule):
             nn.LayerNorm(384),
             nn.Linear(384, 256),
             ReSine(256),
-            LinearSDropout(256, 256),
+            nn.Linear(256, 256),
+            SilentDropout(0.5),
             nn.Linear(256, f_out)
         )
 
@@ -189,41 +209,55 @@ class FeedForward(jit.ScriptModule):
     def forward(self, x):
         return self.ffw(x)
 
-   
 
 # nn.Module -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, max_action=1.0):
         super().__init__()
 
-        self.action_dim = action_dim
 
+        self.action_dim = action_dim
+        q_nodes = 128
+        q_dist = q_nodes*3
         
-        indexes = torch.arange(0, 384, 1)/384
+        indexes = torch.arange(0, q_dist, 1)/q_dist
         weights = torch.tanh((math.e*(1-indexes))**math.e)
+        #weights = torch.exp(-(math.e*indexes)**math.e)
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.a = FeedForward(state_dim, 2*action_dim)
-        self.a_max = nn.Parameter(data= max_action, requires_grad=False)
-        self.noise_std = nn.Parameter(data= math.sqrt(0.05) * max_action, requires_grad=False)
-        self.eps = nn.Parameter(data= torch.zeros(1), requires_grad=False)
-        
+        self.a_max = nn.Parameter(data= torch.ones(action_dim), requires_grad=False)
+        self.s_norm = 2*math.e
+        self.noise_std = math.sqrt(0.02)
 
-        self.qA = FeedForward(state_dim+action_dim, 128)
-        self.qB = FeedForward(state_dim+action_dim, 128)
-        self.qC = FeedForward(state_dim+action_dim, 128)
+        self.qA = FeedForward(state_dim+action_dim, q_nodes)
+        self.qB = FeedForward(state_dim+action_dim, q_nodes)
+        self.qC = FeedForward(state_dim+action_dim, q_nodes)
 
         self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
 
 
+
+
     #========= Actor Forward Pass =========
+    
     @jit.script_method
     def actor(self, state):
         ab = self.a(state).reshape(-1, 2, self.action_dim)
         ab_ = torch.tanh(ab/2)
-        a_, s, s_ = ab_[:, 0], ab[:, 1], self.a_max * (ab_[:, 1] + 1.0)/2
-        a_out = s_* torch.tanh(a_/s_) + self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)
-        return a_out, (s*s_)/(2*math.e)
+        a_, s, s_ =   ab_[:, 0], ab[:, 1], (ab_[:, 1] + 1.0)/2
+        a_out = self.a_max * torch.tanh(s_ * a_ +  self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)) 
+        return a_out, s*s_/self.s_norm
+
+    """
+    @jit.script_method
+    def actor(self, state, noise:float=1.0):
+        a = self.a(state)
+        a_ = torch.tanh(a/2)
+        a_out = self.a_max * torch.tanh(a_ + noise * self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)) 
+        return a_out, a*a_/self.s_norm
+    """
+    
 
 
     #========= Critic Forward Pass =========
@@ -235,12 +269,10 @@ class ActorCritic(jit.ScriptModule):
 
 
 
-    # take average in between min and mean
     @jit.script_method
     def critic_soft(self, state, action):
         q = self.probs * self.critic(state, action).sort(dim=-1)[0]
         q =  q.sum(dim=-1, keepdim=True)
-        #q = 0.618*q.min(dim=-1, keepdim=True)[0] + 0.382*q.mean(dim=-1, keepdim=True)
         return q, q.detach()
 
 
@@ -250,31 +282,33 @@ class ActorCritic(jit.ScriptModule):
 class Symphony(object):
     def __init__(self, state_dim, action_dim, device, max_action=1.0):
 
-        self.tau = 0.005
+        self.G = 5 # update-to-data ratio
+        self.alpha = 0.618
+        self.alpha_ = 1 - self.alpha
+        self.k = self.alpha_ / self.G
+        self.beta = 1e-5
 
+        self.tau = 0.005
         self.tau_ = 1.0 - self.tau
-        self.learning_rate = 3e-4
+        self.q_next_ema = 0.0
+
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.max_action = max_action
         self.device = device
-        
-        self.utd = 3
-        self.q_next_ema = 0.0
-        self.eta = 0.0
+
 
         self.replay_buffer = ReplayBuffer(state_dim, action_dim, device)
 
         self.nets = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
         self.nets_target = ActorCritic(state_dim, action_dim, max_action=max_action).to(device)
         self.nets_target.load_state_dict(self.nets.state_dict())
+        self.nets_optimizer = Adam(self.nets.parameters(), lr=3e-4, betas=(0.9, 0.999))
 
-        self.nets_optimizer = RMSprop(self.nets.parameters(), lr=self.learning_rate)
+
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
-
-        
 
 
     
@@ -285,9 +319,9 @@ class Symphony(object):
         return action.cpu().data.numpy().flatten()
 
     """
-    def select_action(self, state, mean=False, explore=False):
+    def select_action(self, state, noise=1.0, explore=False):
         if explore: return self.max_action*torch.FloatTensor(self.action_dim).uniform_(-0.5, 0.75).to(device)
-        with torch.no_grad(): action = self.nets.actor(state)[0]
+        with torch.no_grad(): action = self.nets.actor(state, noise)[0]
         return action
     """
 
@@ -299,49 +333,57 @@ class Symphony(object):
         np.random.seed(r2)
         random.seed(r3)
 
-        if self.replay_buffer.eta==0.0: self.replay_buffer.fill(5)
-        #if self.replay_buffer.length==self.replay_buffer.capacity: self.utd = 4
-        for i in range(self.utd): self.update()
-        
+        if self.replay_buffer.eta==0.0: self.replay_buffer.norm_R(); self.replay_buffer.fill(5)
+        for _ in range(self.G): self.update()
 
+
+
+        
+        
 
     def update(self):
 
         state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
 
+        #self.beta_optimizer.zero_grad(set_to_none=True)
+        #beta = self.beta.detach()
+        
         with torch.no_grad():
             for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
-                target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data)
-
+                target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data) 
 
         next_action, next_s2 = self.nets.actor(next_state)
         q_next_target, q_next_target_value = self.nets_target.critic_soft(next_state, next_action)
         q_target =  self.replay_buffer.eta * reward  + not_done_gamma * q_next_target_value
         q_pred = self.nets.critic(state, action)
 
-        nets_loss = -q_next_target.mean() + self.rehse(q_pred-q_target) + next_s2.mean()
-        
+        q_next_ema = self.alpha * self.q_next_ema + self.alpha_ * q_next_target_value
+        nets_loss = -self.rehae(self.k * (q_next_target - q_next_ema)) + self.rehse(q_pred-q_target) + self.beta * next_s2.mean()
+
         nets_loss.backward()
         self.nets_optimizer.step()
-
-
-
-
-
-
+        self.q_next_ema = q_next_ema.mean()
+        
+        """
+        beta_loss = self.beta*torch.tanh(self.beta/2)
+        beta_loss.backward()
+        self.beta_optimizer.step()
+        """
 
 
 
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device):
 
-        self.capacity, self.length, self.device = 1024000, 0, device
+        self.capacity, self.length, self.device = 1536000, 0, device
 
         self.random = np.random.default_rng()
         self.indices = []
+        self.indexes = np.array(self.indices)
         self.eta = 0.0
         self.batch_size = 256
+
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
@@ -355,7 +397,6 @@ class ReplayBuffer:
 
         if self.length<self.capacity:
             self.length += 1
-            #self.batch_size = 128 + min(self.length//800, 768)
             self.indices.append(self.length-1)
             self.indexes = np.array(self.indices)
             self.probs = self.fade(self.indexes/self.length)
@@ -376,7 +417,6 @@ class ReplayBuffer:
             self.rewards = torch.roll(self.rewards, shifts=-1, dims=0)
             self.next_states = torch.roll(self.next_states, shifts=-1, dims=0)
             self.not_dones_gamma = torch.roll(self.not_dones_gamma, shifts=-1, dims=0)
-
 
 
    
@@ -406,17 +446,17 @@ class ReplayBuffer:
 
     #Normalized index conversion into fading probabilities
     def fade(self, norm_index):
-        weights = np.tanh((math.e*norm_index)**math.e) # linear - => non-linear ~
+        weights = np.tanh((math.e*norm_index)**math.e)
+        #weights = 1 - np.exp(-(math.e*norm_index)**math.e) # linear - => non-linear ~
         return weights/np.sum(weights) #probabilities
 
-    def norm_Q(self):
-        Q = torch.sum(torch.abs(self.rewards[:self.length]))/self.length
-        return Q.item()
+    def norm_R(self):
+        norm = torch.sum(torch.abs(self.rewards[:self.length]))/self.length
+        self.eta = 0.01/norm.item()
+
 
     def fill(self, times):
 
-
-        self.eta = 0.01/self.norm_Q()
 
         print("copying replay data, current length", self.length)
 
