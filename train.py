@@ -6,7 +6,7 @@ import gymnasium as gym
 import random
 import pickle
 import time
-from symphonyS2 import Symphony, log_file
+from symphony import Symphony, log_file
 
 
 
