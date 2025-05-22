@@ -24,7 +24,7 @@ print(device)
 option = 3
 
 
-explore_time = 5120
+explore_time = 10000
 limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
@@ -52,7 +52,7 @@ elif option == 2:
     env_test = gym.make('Walker2d-v4')
 
 elif option == 3:
-    env = gym.make('Humanoid-v4')
+    env = gym.make('Humanoid-v4', render_mode="human")
     env_test = gym.make('Humanoid-v4')
 
 elif option == 4:
@@ -291,13 +291,12 @@ for i in range(start_episode, num_episodes):
             part = ""
             #part = "_"+str(total_steps/1000) if total_steps%300000==0 else ""
             testing(env_test, limit_step=limit_eval, test_episodes=50, current_step=total_steps, save_log=True)
-            if total_steps%5000==0:
-                print("saving data...")
-                torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
-                torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
-                with open('data'+ part, 'wb') as file:
-                    pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
-                print("...saved")
+            print("saving data...")
+            torch.save(algo.nets.state_dict(), 'nets_model'+ part +'.pt')
+            torch.save(algo.nets_target.state_dict(), 'nets_target_model'+ part +'.pt')
+            with open('data'+ part, 'wb') as file:
+                pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps, 'average_steps': average_steps}, file)
+            print("...saved")
 
 
         action = algo.select_action(state)
