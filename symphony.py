@@ -191,6 +191,7 @@ class SilentDropout(jit.ScriptModule):
 
 
 class FeedForward(jit.ScriptModule):
+#class FeedForward(nn.Module):
     def __init__(self, f_in, f_out):
         super(FeedForward, self).__init__()
 
@@ -212,6 +213,7 @@ class FeedForward(jit.ScriptModule):
 
 # nn.Module -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
+#class ActorCritic(nn.Module):
     def __init__(self, state_dim, action_dim, max_action=1.0):
         super().__init__()
 
@@ -222,12 +224,10 @@ class ActorCritic(jit.ScriptModule):
         
         indexes = torch.arange(0, q_dist, 1)/q_dist
         weights = torch.tanh((math.e*(1-indexes))**math.e)
-        #weights = torch.exp(-(math.e*indexes)**math.e)
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
-        self.a = FeedForward(state_dim, 3*action_dim)
+        self.a = FeedForward(state_dim, 2*action_dim)
         self.a_max = nn.Parameter(data= torch.ones(action_dim), requires_grad=False)
-        self.s_norm = 2*math.e
         self.noise_std = math.sqrt(0.02)
 
         self.qA = FeedForward(state_dim+action_dim, q_nodes)
@@ -243,11 +243,11 @@ class ActorCritic(jit.ScriptModule):
     
     @jit.script_method
     def actor(self, state):
-        ab = self.a(state).reshape(-1, 3, self.action_dim)
+        ab = self.a(state).reshape(-1, 2, self.action_dim)
         ab_ = torch.tanh(ab/2)
         a_, s, s_ =   ab_[:, 0], ab[:, 1], (ab_[:, 1]+1)/2
-        a_out = self.a_max * torch.tanh(s_ * a_ +   self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)) 
-        return a_out, s*s_/self.s_norm
+        a_out = self.a_max * torch.tanh(s_ * a_ +  self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)) 
+        return a_out, s*s_
 
     """
     @jit.script_method
@@ -255,7 +255,7 @@ class ActorCritic(jit.ScriptModule):
         a = self.a(state)
         a_ = torch.tanh(a/2)
         a_out = self.a_max * torch.tanh(a_ + noise * self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)) 
-        return a_out, a*a_/self.s_norm
+        return a_out, a*a_
     """
     
 
@@ -280,14 +280,14 @@ class ActorCritic(jit.ScriptModule):
 
 # Define the algorithm
 class Symphony(object):
-    def __init__(self, state_dim, action_dim, device, max_action=1.0):
+    def __init__(self, state_dim, action_dim, device, max_action=1.0, learning_rate=3e-4, update_to_data=3):
 
-        self.G = 3 # update-to-data ratio
+        self.G = update_to_data # update-to-data ratio
         self.alpha = math.tanh(1)
         self.alpha_ = 1 - self.alpha
         self.k = self.alpha_ / (math.sqrt(2*math.e) * self.G)
-        self.lr = 3e-4
-        self.beta = 1e-5
+        self.lr = learning_rate
+        self.beta = 1e-3*self.k**2
 
         self.tau = 0.005
         self.tau_ = 1.0 - self.tau
@@ -335,7 +335,9 @@ class Symphony(object):
         random.seed(r3)
 
         if self.replay_buffer.eta==0.0: self.replay_buffer.norm_R(); self.replay_buffer.fill(10)
-        for i in range(self.G): self.update()
+
+        for _ in range(self.G): self.update()
+           
 
         
         
@@ -345,7 +347,7 @@ class Symphony(object):
         state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample()
         self.nets_optimizer.zero_grad(set_to_none=True)
 
-        
+
         with torch.no_grad():
             for target_param, param in zip(self.nets_target.qnets.parameters(), self.nets.qnets.parameters()):
                 target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data) 
@@ -370,7 +372,7 @@ class Symphony(object):
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device):
 
-        self.capacity, self.length, self.device = 1000000, 0, device
+        self.capacity, self.length, self.device = 512000, 0, device
 
         self.random = np.random.default_rng()
         self.indices = []
@@ -441,7 +443,6 @@ class ReplayBuffer:
     #Normalized index conversion into fading probabilities
     def fade(self, norm_index):
         weights = np.tanh((math.e*norm_index)**math.e)
-        #weights = 1 - np.exp(-(math.e*norm_index)**math.e) # linear - => non-linear ~
         return weights/np.sum(weights) #probabilities
 
     def norm_R(self):
