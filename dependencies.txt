@@ -1,1 +1,1 @@
-test
+pip3 install gymnasium[mujoco]
