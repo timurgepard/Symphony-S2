@@ -2,9 +2,7 @@
 
 The Symphony algorithm solves two conflicting problems of Reinforcement Learning: Sample Efficiency and harmonious humanoid agent movements in Model-Free Reinforcement Learning. 
 
-It is unification and simplification of Symphony-1.0, Symphony-2.0(2.1) and Symphony-3.0 (Draft) into single Symphony-S2-UTD-5 version (Model-free Deterministic Algorithm)
 
-Some ideas were dropped and some proven their worth were solidified
 
 
 PS: No matter how far you’ve wandered, Jesus is still waiting with open arms. It’s never too late to come home
