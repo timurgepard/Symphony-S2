@@ -191,7 +191,6 @@ class SilentDropout(jit.ScriptModule):
 
 
 class FeedForward(jit.ScriptModule):
-#class FeedForward(nn.Module):
     def __init__(self, f_in, f_out):
         super(FeedForward, self).__init__()
 
@@ -213,7 +212,6 @@ class FeedForward(jit.ScriptModule):
 
 # nn.Module -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
-#class ActorCritic(nn.Module):
     def __init__(self, state_dim, action_dim, max_action=1.0):
         super().__init__()
 
@@ -246,7 +244,7 @@ class ActorCritic(jit.ScriptModule):
         ab = self.a(state).reshape(-1, 2, self.action_dim)
         ab_ = torch.tanh(ab/2)
         a_, s, s_ =   ab_[:, 0], ab[:, 1], (ab_[:, 1]+1)/2
-        a_out = self.a_max * torch.tanh(s_ * a_ +  self.noise_std * torch.randn_like(a_).clamp(-math.e, math.e)) 
+        a_out = self.a_max * torch.tanh(s_ * a_ +  self.noise_std * torch.randn_like(a_).clamp(-math.pi, math.pi)) 
         return a_out, s*s_
 
     """
@@ -283,11 +281,13 @@ class Symphony(object):
     def __init__(self, state_dim, action_dim, device, max_action=1.0, learning_rate=3e-4, update_to_data=3):
 
         self.G = update_to_data # update-to-data ratio
-        self.alpha = math.tanh(1)
+        #phi = (1+math.sqrt(5))/2
+        #self.alpha = phi/(phi+1)
+        self.alpha = 0.75
         self.alpha_ = 1 - self.alpha
-        self.k = self.alpha_ / (math.sqrt(2*math.e) * self.G)
+        self.k = self.alpha_ / (2 * self.G)
         self.lr = learning_rate
-        self.beta = 1e-3*self.k**2
+        self.beta = 0.002*self.k**2
 
         self.tau = 0.005
         self.tau_ = 1.0 - self.tau
