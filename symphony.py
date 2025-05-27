@@ -283,9 +283,9 @@ class Symphony(object):
         self.G = update_to_data # update-to-data ratio
         #phi = (1+math.sqrt(5))/2
         #self.alpha = phi/(phi+1)
-        self.alpha = 0.75
+        self.alpha = 1/(1+math.exp(-1))
         self.alpha_ = 1 - self.alpha
-        self.k = self.alpha_ / (2 * self.G)
+        self.k = self.alpha_ / (math.sqrt(2*math.pi) * self.G)
         self.lr = learning_rate
         self.beta = 0.002*self.k**2
 
