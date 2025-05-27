@@ -447,7 +447,6 @@ class ReplayBuffer:
         norm = torch.sum(torch.abs(self.rewards[:self.length]))/self.length
         self.eta = 0.01/norm.item()
 
-
     def fill(self, times):
 
 
