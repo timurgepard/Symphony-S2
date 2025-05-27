@@ -38,6 +38,8 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning, total_steps = 
 
 # environment type.
 option = 3
+pre_valid = False
+
 
 if option == 1:
     env = gym.make('HalfCheetah-v4', render_mode="human")
@@ -143,7 +145,7 @@ try:
     algo.nets.load_state_dict(torch.load('nets_model.pt', weights_only=True))
     algo.nets_target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
     print('models loaded')
-    #testing(env_test, limit_eval, 100)
+    if pre_valid: testing(env_test, limit_eval, 100)
 except:
     print("problem during loading models")
 
