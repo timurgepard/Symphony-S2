@@ -29,7 +29,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 learning_rate = 3e-4
 update_to_data = 3
-explore_time = 5120
+explore_time = 10000
 limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
@@ -38,8 +38,7 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning, total_steps = 
 
 # environment type.
 option = 3
-pre_valid = False
-
+pre_valid = True
 
 if option == 1:
     env = gym.make('HalfCheetah-v4', render_mode="human")
@@ -52,6 +51,7 @@ elif option == 2:
 elif option == 3:
     env = gym.make('Humanoid-v4')
     env_test = gym.make('Humanoid-v4')
+    if pre_valid: env_test = gym.make('Humanoid-v4', render_mode="human")
 
 elif option == 4:
     env = gym.make('Ant-v4')
@@ -120,6 +120,25 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
 
 
 
+def save_data_models():
+    print("saving data...")
+    torch.save(algo.nets.state_dict(), 'nets_model.pt')
+    torch.save(algo.nets_target.state_dict(), 'nets_target_model.pt')
+    with open('data', 'wb') as file:
+        pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps}, file)
+    print("...saved")
+
+def hard_recovery(algo, replay_buffer, size):
+    algo.replay_buffer.states[:size] = replay_buffer.states[:size]
+    algo.replay_buffer.actions[:size] = replay_buffer.actions[:size]
+    algo.replay_buffer.rewards[:size] = replay_buffer.rewards[:size]
+    algo.replay_buffer.next_states[:size] = replay_buffer.next_states[:size]
+    algo.replay_buffer.not_dones_gamma[:size] = replay_buffer.not_dones_gamma[:size]
+    algo.replay_buffer.eta = replay_buffer.eta
+    algo.replay_buffer.indices = replay_buffer.indices[:size]
+    algo.replay_buffer.indexes = np.array(replay_buffer.indices)
+    algo.replay_buffer.length = len(replay_buffer.indices)
+    algo.replay_buffer.probs = algo.replay_buffer.fade(algo.replay_buffer.indexes/algo.replay_buffer.length)
 
 
 try:
@@ -127,6 +146,7 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
+        #hard_recovery(algo, dict['buffer'], 351200) # comment the previous line and chose a memory size to recover from old buffer
         algo.q_next_ema = dict['q_next_ema']
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
@@ -148,15 +168,6 @@ try:
     if pre_valid: testing(env_test, limit_eval, 100)
 except:
     print("problem during loading models")
-
-
-def save_data_models():
-    print("saving data...")
-    torch.save(algo.nets.state_dict(), 'nets_model.pt')
-    torch.save(algo.nets_target.state_dict(), 'nets_target_model.pt')
-    with open('data', 'wb') as file:
-        pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps}, file)
-    print("...saved")
 
 #==============================================================================================
 #==============================================================================================
@@ -217,7 +228,7 @@ for i in range(start_episode, num_episodes):
         # save models, data
         if (total_steps>=1250 and total_steps%1250==0):
             testing(env_test, limit_step=limit_eval, test_episodes=50, current_step=total_steps, save_log=True)
-            if total_steps%10000==0: save_data_models()
+            if total_steps%5000==0: save_data_models()
 
 
         action = algo.select_action(state)
