@@ -75,22 +75,6 @@ log_file = LogFile(log_name_main, log_name_opt)
 #==============================================================================================
 
 
-class SGD(optim.Optimizer):
-    def __init__(self, params, lr=1e-3):
-        defaults = dict(lr=lr)
-        super().__init__(params, defaults)
-        self.lr = lr
-
-
-    @torch.no_grad()
-    def step(self):
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-
-                p.add_(p.grad, alpha=-self.lr)
-
 
 class Adam(optim.Optimizer):
     def __init__(self, params, lr=3e-4, betas=(0.9, 0.999)):
@@ -208,19 +192,6 @@ class FeedForward(jit.ScriptModule):
         return self.ffw(x)
 
 
-#Rectified Huber Asymmetric Error Loss Function via JIT Module
-# nn.Module -> JIT C++ graph
-class Update(jit.ScriptModule):
-    def __init__(self, nets, nets_target, eta):
-        super(Update, self).__init__()
-        self.nets = nets
-        self.nets_target = nets_target
-
-    @jit.script_method
-    def forward(self, e):
-        return (torch.abs(e) * torch.tanh(e/2)).mean()
-
-
 # nn.Module -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, max_action=1.0):
@@ -291,10 +262,8 @@ class ActorCritic(jit.ScriptModule):
 class Symphony(object):
     def __init__(self, state_dim, action_dim, device, max_action=1.0, learning_rate=3e-4, update_to_data=3):
 
-        self.G = 3
-        self.alpha = 0.75
-        self.alpha_ = 1 - self.alpha
-        self.k = self.alpha_ / math.sqrt(2*math.pi*self.G)
+        self.G = update_to_data # update-to-data ratio
+        self.k = 1/math.sqrt(2*math.pi*self.G)
         self.k_2 = 0.5 * self.k**2
         self.lr = learning_rate
 
@@ -334,24 +303,19 @@ class Symphony(object):
         return action
     """
 
-
-    def train(self):
+    def seed_reset(self):
         # decreases dependence on random seeds:
         r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
         torch.manual_seed(r1)
         np.random.seed(r2)
         random.seed(r3)
 
-        
+    def train(self):
 
+        self.seed_reset()
         if self.replay_buffer.eta==0.0: self.replay_buffer.norm_R(); self.replay_buffer.fill(10)
         for _ in range(self.G): self.update()
 
-
-
-
- 
-        
 
     def update(self):
 
@@ -368,13 +332,12 @@ class Symphony(object):
         q_target =  self.replay_buffer.eta * reward  + not_done_gamma * q_next_target_value
         q_pred = self.nets.critic(state, action)
 
-        q_next_ema = self.alpha * self.q_next_ema + self.alpha_ * q_next_target_value
-        nets_loss = -self.rehae(self.k * (q_next_target - q_next_ema))  + self.rehse(q_pred-q_target) + self.k_2 * next_s2.mean()
+        nets_loss = -self.rehae(self.k * q_next_target)  + self.rehse(q_pred-q_target) + self.k_2 * next_s2.mean()
+
 
         nets_loss.backward()
         self.nets_optimizer.step()
-        self.q_next_ema = q_next_ema.mean()
-        
+       
 
 
 
@@ -383,14 +346,13 @@ class Symphony(object):
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device):
 
-        self.capacity, self.length, self.idx, self.device = 1000000, 0, 0, device
-        self.batch_size = np.minimum(256 + np.arange(self.capacity) // 2400, 512)
-
+        self.capacity, self.length, self.device = 1000000, 0, device
 
         self.random = np.random.default_rng()
         self.indices = []
         self.indexes = np.array(self.indices)
         self.eta = 0.0
+        self.batch_size = 384
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
@@ -409,13 +371,13 @@ class ReplayBuffer:
             self.probs = self.fade(self.indexes/self.length)
 
 
-        self.idx = self.length-1
+        idx = self.length-1
         
-        self.states[self.idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
-        self.actions[self.idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
-        self.rewards[self.idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
-        self.next_states[self.idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
-        self.not_dones_gamma[self.idx,:] = 0.99 * (1.0 - torch.tensor([done], dtype=torch.float32, device=self.device))
+        self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
+        self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
+        self.rewards[idx,:] = torch.tensor([reward], dtype=torch.float32, device=self.device)
+        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
+        self.not_dones_gamma[idx,:] = 0.99 * (1.0 - torch.tensor([done], dtype=torch.float32, device=self.device))
 
 
         if self.length>=self.capacity:
@@ -429,7 +391,7 @@ class ReplayBuffer:
    
     # Do not use any decorators with random generators (Symphony updates seed each time)
     def sample(self):
-        indices = self.random.choice(self.indexes, p=self.probs, size=self.batch_size[self.idx])
+        indices = self.random.choice(self.indexes, p=self.probs, size=self.batch_size)
 
         return (
             self.states[indices],
