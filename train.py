@@ -5,7 +5,6 @@ import numpy as np
 import gymnasium as gym
 import random
 import pickle
-import time
 from symphony import Symphony, log_file
 
 
@@ -25,11 +24,12 @@ def seed_reset():
 
 
 #global parameters
+LAPTOP = True # CPU/GPU cooling
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 learning_rate = 3e-4
 update_to_data = 3
-explore_time = 10000
+explore_time = 10240
 limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
@@ -37,11 +37,11 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning, total_steps = [], [], [], False, 0
 
 # environment type.
-option = 3
-pre_valid = True
+option = 1
+pre_valid = False
 
 if option == 1:
-    env = gym.make('HalfCheetah-v4', render_mode="human")
+    env = gym.make('HalfCheetah-v4')
     env_test = gym.make('HalfCheetah-v4')
 
 elif option == 2:
@@ -109,7 +109,7 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
         validate_return = np.mean(episode_return[-100:])
         print(f"trial {test_episode+1}:, Rtrn = {episode_return[test_episode]:.2f}, Average 100 = {validate_return:.2f}, steps: {steps}")
 
-    if save_log: log_file.write(str(current_step) + " : " + str(round(validate_return.item(), 2)) + "\n")
+    if save_log: log_file.write(str(current_step) + " : " + str(round(validate_return.item(), 2)) +  "\n")
 
 
 #==============================================================================================
@@ -215,19 +215,18 @@ for i in range(start_episode, num_episodes):
 
     rewards = []
     state = env.reset()[0]
-    #--------------------2. CPU/GPU cooling ------------------
-    time.sleep(0.3)
+   
 
     for steps in range(1, limit_step+1):
 
-        algo.train()
+        scale = algo.train(laptop=LAPTOP)
         seed_reset()
 
         total_steps += 1
 
         # save models, data
-        if (total_steps>=1250 and total_steps%1250==0):
-            testing(env_test, limit_step=limit_eval, test_episodes=50, current_step=total_steps, save_log=True)
+        if (total_steps>=2500 and total_steps%2500==0):
+            testing(env_test, limit_step=limit_eval, test_episodes=25, current_step=total_steps, save_log=True)
             if total_steps%5000==0: save_data_models()
 
 
@@ -242,6 +241,5 @@ for i in range(start_episode, num_episodes):
     episode_steps_all.append(steps)
 
 
-    print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {steps} | total_steps = {total_steps}")
-
-    log_file.write_opt(str(i) + " : " + str(round(episode_rewards_all[-1], 2)) + " : step : " + str(total_steps) + "\n")
+    print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {steps} | total_steps = {total_steps}  | S = {scale:.6f} ")
+    log_file.write_opt(str(i) + " : " + str(round(episode_rewards_all[-1], 2)) + " : step : " + str(total_steps) + " : scale : " + str(round(scale, 4)) + "\n")
