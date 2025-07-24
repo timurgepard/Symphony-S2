@@ -113,11 +113,6 @@ class Adam(optim.Optimizer):
                 
 
 
-                
-
-
-
-
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
 # nn.Module -> JIT C++ graph
@@ -154,23 +149,6 @@ class ReSine(jit.ScriptModule):
         s = torch.sigmoid(self.s)
         x = s*torch.sin(x/s)
         return x/(1+torch.exp(-1.5*x/s))
-
-
-
-#Silent Dropout function created with the help of ChatGPT
-# nn.Module -> JIT C++ graph
-class SilentDropout(jit.ScriptModule):
-    def __init__(self, p=0.5):
-        super(SilentDropout, self).__init__()
-        self.p = p
-
-
-    @jit.script_method
-    def forward(self, x):
-        mask = (torch.rand_like(x) > self.p).float()
-        return  mask * x + (1.0-mask) * x.detach()
-
-
 
 
 
@@ -340,7 +318,7 @@ class Symphony(object):
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device):
 
-        self.capacity, self.length, self.idx, self.device = 768000, 0, 0, device
+        self.capacity, self.length, self.idx, self.device = 1024000, 0, 0, device
         self.batch_size = np.arange(1, self.capacity+1)//2000
 
 
