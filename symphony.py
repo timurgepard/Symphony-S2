@@ -74,21 +74,6 @@ log_file = LogFile(log_name_main, log_name_opt)
 #==============================================================================================
 #==============================================================================================
 
-class SGD(optim.Optimizer):
-    def __init__(self, params, lr=1e-3):
-        defaults = dict(lr=lr)
-        super().__init__(params, defaults)
-        self.lr = lr
-
-
-    @torch.no_grad()
-    def step(self):
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-
-                p.add_(p.grad, alpha=-self.lr)
 
 class Adam(optim.Optimizer):
     def __init__(self, params, lr=3e-4, betas=(0.75, 0.995)):
@@ -113,13 +98,11 @@ class Adam(optim.Optimizer):
                 if len(state) == 0:
                     state['m'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    #state['g'] = grad.clone()
+
 
                 m = state['m']
                 v = state['v']
-                #g = state['g']
-                #d = g.abs() * 0.2
-                
+
                 # Update biased first moment estimate
                 m.mul_(self.beta1).add_(grad, alpha=self.beta1_)
                 # Update biased second raw moment estimate
@@ -128,10 +111,6 @@ class Adam(optim.Optimizer):
                 # Update parameters
                 p.addcdiv_(m, v.sqrt() + self.eps, value=-self.lr)
                 
-                #adam_grad = m/(v.sqrt() + self.eps)
-                #p.add_(adam_grad.clamp(min=g-d, max=g+d), alpha=-self.lr)
-
-                #state['g'].copy_(adam_grad)
 
 
                 
@@ -248,7 +227,7 @@ class ActorCritic(jit.ScriptModule):
         ASB = torch.tanh(self.a(state)/2).reshape(-1, 2, self.action_dim)
         A, S =   ASB[:, 0], (ASB[:, 1]+1)/2
         a_out = self.a_max * torch.tanh(S * A +  self.noise_std * torch.randn_like(A).clamp(-math.pi, math.pi)) 
-        return a_out, 3e-4 * S**2, S.detach()
+        return a_out, 1e-4 * S**2, S.detach()
 
 
 
@@ -276,7 +255,7 @@ class Symphony(object):
     def __init__(self, state_dim, action_dim, device, max_action=1.0, learning_rate=3e-4, update_to_data=1):
 
         self.G = update_to_data
-        self.alpha = 0.75
+        self.alpha = 0.5
         self.alpha_ = 1 - self.alpha
         self.lr = learning_rate
 
@@ -317,7 +296,7 @@ class Symphony(object):
 
     def train(self, laptop = False):
         # CPU/GPU cooling for Laptops
-        if laptop: time.sleep(0.02)
+        if laptop: time.sleep(0.01)
         # decreases dependence on random seeds:
         r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
         torch.manual_seed(r1)
@@ -362,7 +341,7 @@ class ReplayBuffer:
     def __init__(self, state_dim, action_dim, device):
 
         self.capacity, self.length, self.idx, self.device = 768000, 0, 0, device
-        self.batch_size = 128 + np.arange(1, self.capacity+1)//2000
+        self.batch_size = np.arange(1, self.capacity+1)//2000
 
 
         self.random = np.random.default_rng()
