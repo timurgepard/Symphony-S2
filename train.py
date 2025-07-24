@@ -24,7 +24,7 @@ def seed_reset():
 
 
 #global parameters
-LAPTOP = True # CPU/GPU cooling
+LAPTOP = False # CPU/GPU cooling
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 learning_rate = 3e-4
@@ -37,7 +37,7 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning, total_steps = [], [], [], False, 0
 
 # environment type.
-option = 1
+option = 3
 pre_valid = False
 
 if option == 1:
@@ -136,9 +136,10 @@ def hard_recovery(algo, replay_buffer, size):
     algo.replay_buffer.not_dones_gamma[:size] = replay_buffer.not_dones_gamma[:size]
     algo.replay_buffer.eta = replay_buffer.eta
     algo.replay_buffer.indices = replay_buffer.indices[:size]
-    algo.replay_buffer.indexes = np.array(replay_buffer.indices)
-    algo.replay_buffer.length = len(replay_buffer.indices)
-    algo.replay_buffer.probs = algo.replay_buffer.fade(algo.replay_buffer.indexes/algo.replay_buffer.length)
+    algo.replay_buffer.indexes = replay_buffer.indexes[:size]
+    algo.replay_buffer.length = replay_buffer.length
+    algo.replay_buffer.probs = replay_buffer.probs[:size]
+    print("hard_recovery... eta: ", algo.replay_buffer.eta, ", buffer length:", algo.replay_buffer.length)
 
 
 try:
@@ -146,7 +147,7 @@ try:
     with open('data', 'rb') as file:
         dict = pickle.load(file)
         algo.replay_buffer = dict['buffer']
-        #hard_recovery(algo, dict['buffer'], 351200) # comment the previous line and chose a memory size to recover from old buffer
+        #hard_recovery(algo, dict['buffer'], 735998) # comment the previous line and chose a memory size to recover from old buffer
         algo.q_next_ema = dict['q_next_ema']
         episode_rewards_all = dict['episode_rewards_all']
         episode_steps_all = dict['episode_steps_all']
