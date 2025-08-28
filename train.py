@@ -24,7 +24,6 @@ def seed_reset():
 
 
 #global parameters
-LAPTOP = False # CPU/GPU cooling
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 learning_rate = 3e-4
@@ -122,10 +121,11 @@ def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
 
 def save_data_models():
     print("saving data...")
-    torch.save(algo.nets.state_dict(), 'nets_model.pt')
-    torch.save(algo.nets_target.state_dict(), 'nets_target_model.pt')
+    torch.save(algo.nets.online.state_dict(), 'nets_model.pt')
+    torch.save(algo.nets.target.state_dict(), 'nets_target_model.pt')
+    torch.save(algo.nets_optimizer.state_dict(), 'nets_optimizer.pt')
     with open('data', 'wb') as file:
-        pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps}, file)
+        pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.nets.q_next_ema, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps}, file)
     print("...saved")
 
 def hard_recovery(algo, replay_buffer, size):
@@ -163,13 +163,19 @@ except:
 
 try:
     print("loading models...")
-    algo.nets.load_state_dict(torch.load('nets_model.pt', weights_only=True))
-    algo.nets_target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
+    algo.nets.online.load_state_dict(torch.load('nets_model.pt', weights_only=True))
+    algo.nets.target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
     print('models loaded')
     if pre_valid: testing(env_test, limit_eval, 100)
 except:
     print("problem during loading models")
 
+
+try:
+    algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt', weights_only=True))
+    print("optimizer loaded...")
+except:
+    print("problem during loading optimizer")
 #==============================================================================================
 #==============================================================================================
 #========================================EXPLORATION===========================================
@@ -220,7 +226,7 @@ for i in range(start_episode, num_episodes):
 
     for steps in range(1, limit_step+1):
 
-        scale = algo.train(laptop=LAPTOP)
+        scale = algo.train()
         seed_reset()
 
         total_steps += 1
@@ -241,6 +247,8 @@ for i in range(start_episode, num_episodes):
     episode_rewards_all.append(np.sum(rewards))
     episode_steps_all.append(steps)
 
+    #print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {steps} | total_steps = {total_steps} ")
+    #log_file.write_opt(str(i) + " : " + str(round(episode_rewards_all[-1], 2)) + " : step : " + str(total_steps) + "\n")
 
-    print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {steps} | total_steps = {total_steps}  | S = {scale:.6f} ")
-    log_file.write_opt(str(i) + " : " + str(round(episode_rewards_all[-1], 2)) + " : step : " + str(total_steps) + " : scale : " + str(round(scale, 4)) + "\n")
+    print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {steps} | total_steps = {total_steps}  | scale = {scale:.4f}  ")
+    log_file.write_opt(str(i) + " : " + str(round(episode_rewards_all[-1], 2)) + " : step : " + str(total_steps) + " : scale : " + str(round(scale, 4))  + "\n")
