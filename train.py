@@ -27,8 +27,7 @@ def seed_reset():
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 learning_rate = 3e-4
-update_to_data = 3
-explore_time = 10240
+explore_time = 5120
 limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
@@ -73,7 +72,7 @@ max_action = torch.ones(action_dim)
 
 print("action_dim: ", action_dim, "state_dim: ", state_dim, "max_action:", max_action)
 
-algo = Symphony(state_dim, action_dim, device, max_action, learning_rate, update_to_data)
+algo = Symphony(state_dim, action_dim, device, max_action, learning_rate)
 
 
 
@@ -215,7 +214,7 @@ if not Q_learning:
 
 
 
-print("started training")
+
 
 
 for i in range(start_episode, num_episodes):
