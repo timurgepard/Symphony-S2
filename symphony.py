@@ -177,7 +177,7 @@ class ActorCritic(jit.ScriptModule):
 
 
         self.action_dim = action_dim
-        q_nodes = 128
+        q_nodes = 32
         q_dist = 3*q_nodes
 
         indexes = torch.arange(0, q_dist, 1)/q_dist
@@ -200,10 +200,10 @@ class ActorCritic(jit.ScriptModule):
     
     @jit.script_method
     def actor(self, state):
-        ASB = torch.tanh(self.a(state)/2).reshape(-1, 2, self.action_dim)
-        A, S =   ASB[:, 0], (ASB[:, 1]+1)/2
+        AS = torch.tanh(self.a(state)/2).reshape(-1, 2, self.action_dim)
+        A, S =   AS[:, 0], (AS[:, 1]+1)/2
         a_out = self.a_max * torch.tanh(S * A +  self.noise_std * torch.randn_like(A).clamp(-math.pi, math.pi)) 
-        return a_out, 3e-4 * S**2, S.detach()
+        return a_out, 3e-4 * S*torch.tanh(S/2), S.detach()
 
 
 
@@ -263,9 +263,7 @@ class Nets(jit.ScriptModule):
 
 # Define the algorithm
 class Symphony(object):
-    def __init__(self, state_dim, action_dim, device, max_action=1.0, learning_rate=3e-4, update_to_data=1):
-
-        self.G = update_to_data
+    def __init__(self, state_dim, action_dim, device, max_action=1.0, learning_rate=3e-4):
 
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -276,8 +274,6 @@ class Symphony(object):
 
         self.nets = Nets(state_dim, action_dim, max_action, device)
         self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate)
-
-        self.scaler = torch.amp.GradScaler()
 
 
     
@@ -300,17 +296,16 @@ class Symphony(object):
         np.random.seed(r2)
         random.seed(r3)
 
-        if self.replay_buffer.eta==0.0: self.replay_buffer.norm_R(); self.replay_buffer.fill(50)
-        for _ in range(self.G):
+        if self.replay_buffer.eta==0.0: self.replay_buffer.norm_R(); self.replay_buffer.fill(25)
 
-            state, action, reward, next_state, not_done_gamma, eta = self.replay_buffer.sample()
-            self.nets_optimizer.zero_grad(set_to_none=True)
-            self.nets.tau_update()
+        state, action, reward, next_state, not_done_gamma, eta = self.replay_buffer.sample()
+        self.nets_optimizer.zero_grad(set_to_none=True)
+        self.nets.tau_update()
 
-            nets_loss, action_scale = self.nets(state, action, reward, next_state, not_done_gamma, eta)
+        nets_loss, action_scale = self.nets(state, action, reward, next_state, not_done_gamma, eta)
 
-            (nets_loss/self.G).backward()
-            self.nets_optimizer.step()
+        nets_loss.backward()
+        self.nets_optimizer.step()
 
         return action_scale
 
