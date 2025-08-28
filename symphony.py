@@ -257,7 +257,7 @@ class Nets(jit.ScriptModule):
         nets_loss = -self.rehae(q_next_target - q_next_ema) + self.rehse(q_pred-q_target) + next_s2.mean()
         self.q_next_ema = q_next_ema.mean()
 
-        return nets_loss, scale
+        return nets_loss, scale.mean().item()
 
 
 
@@ -308,15 +308,14 @@ class Symphony(object):
             self.nets.tau_update()
 
             with torch.autocast(device_type='cuda', dtype=torch.float16):
-                nets_loss, scale = self.nets(state, action, reward, next_state, not_done_gamma, eta)
+                nets_loss, action_scale = self.nets(state, action, reward, next_state, not_done_gamma, eta)
 
             self.scaler.scale(nets_loss/self.G).backward()
             self.scaler.step(self.nets_optimizer)
             self.scaler.update()
             #nets_loss.backward()
             #self.nets_optimizer.step()
-        return scale.mean().item()
-
+        return action_scale
 
 
 
