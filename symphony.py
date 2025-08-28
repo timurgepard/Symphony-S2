@@ -142,7 +142,7 @@ class ReHAE(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        self.s = nn.Parameter(data=2.0*torch.rand(hidden_dim)-1.0, requires_grad=True)
+        self.s = nn.Parameter(data=2.0*torch.rand(hidden_dim)-1.0, requires_grad=False)
 
     @jit.script_method
     def forward(self, x):
@@ -238,7 +238,7 @@ class Nets(jit.ScriptModule):
         self.tau_ = 1.0 - self.tau
         self.alpha = 0.7
         self.alpha_= 1.0 - self.alpha
-        self.q_next_ema = torch.zeros(1, dtype=torch.float16, device=device)
+        self.q_next_ema = torch.zeros(1, device=device)
 
     @torch.no_grad()
     def tau_update(self):
@@ -282,7 +282,7 @@ class Symphony(object):
 
     
     def select_action(self, state, explore=False):
-        state = torch.FloatTensor(state).reshape(-1,self.state_dim).to(self.device)
+        state = torch.tensor(state, dtype=torch.float32, device=self.device).reshape(-1,self.state_dim)
         with torch.no_grad(): action = self.nets.online.actor(state)[0]
         return action.cpu().data.numpy().flatten()
 
@@ -307,14 +307,11 @@ class Symphony(object):
             self.nets_optimizer.zero_grad(set_to_none=True)
             self.nets.tau_update()
 
-            with torch.autocast(device_type='cuda', dtype=torch.float16):
-                nets_loss, action_scale = self.nets(state, action, reward, next_state, not_done_gamma, eta)
+            nets_loss, action_scale = self.nets(state, action, reward, next_state, not_done_gamma, eta)
 
-            self.scaler.scale(nets_loss/self.G).backward()
-            self.scaler.step(self.nets_optimizer)
-            self.scaler.update()
-            #nets_loss.backward()
-            #self.nets_optimizer.step()
+            (nets_loss/self.G).backward()
+            self.nets_optimizer.step()
+
         return action_scale
 
 
@@ -332,7 +329,7 @@ class ReplayBuffer:
         self.random = np.random.default_rng()
         self.indices = []
         self.indexes = np.array(self.indices)
-        self.eta = torch.zeros(1, dtype=torch.float16, device=device)
+        self.eta = torch.zeros(1, device=device)
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float16, device=device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float16, device=device)
@@ -374,11 +371,11 @@ class ReplayBuffer:
         indices = self.random.choice(self.indexes, p=self.probs, size=self.batch_size[self.idx])
 
         return (
-            self.states[indices],
-            self.actions[indices],
-            self.rewards[indices],
-            self.next_states[indices],
-            self.not_dones_gamma[indices],
+            self.states[indices].float(),
+            self.actions[indices].float(),
+            self.rewards[indices].float(),
+            self.next_states[indices].float(),
+            self.not_dones_gamma[indices].float(),
             self.eta
         )
 
