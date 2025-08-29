@@ -142,7 +142,7 @@ class ReHAE(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        self.s = nn.Parameter(data=2.0*torch.rand(hidden_dim)-1.0, requires_grad=False)
+        self.s = nn.Parameter(data=2.0*torch.rand(hidden_dim)-1.0, requires_grad=True)
 
     @jit.script_method
     def forward(self, x):
@@ -181,7 +181,7 @@ class ActorCritic(jit.ScriptModule):
         q_dist = 3*q_nodes
 
         indexes = torch.arange(0, q_dist, 1)/q_dist
-        weights = torch.tanh((math.pi*(1-indexes))**math.e)
+        weights = torch.tanh((math.pi*(1-indexes))**math.pi)
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.a = FeedForward(state_dim, 2*action_dim)
@@ -388,7 +388,7 @@ class ReplayBuffer:
 
     #Normalized index conversion into fading probabilities
     def fade(self, norm_index):
-        weights = np.tanh((math.pi*norm_index)**math.e)
+        weights = np.tanh((math.pi*norm_index)**math.pi)
         return weights/np.sum(weights) #probabilities
 
     def norm_R(self):
