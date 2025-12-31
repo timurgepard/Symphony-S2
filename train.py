@@ -1,35 +1,136 @@
+from symphony import Symphony
+import gymnasium as gym
+
 import logging
 logging.getLogger().setLevel(logging.CRITICAL)
 import torch
 import numpy as np
-import gymnasium as gym
 import random
 import pickle
-from symphony import Symphony, log_file
 import time
+import os, re
 
-np.set_printoptions(threshold=10000, linewidth=200)
+#############################################
+# -----------Helper Functions---------------#
+#############################################
 
+
+
+# random seeds for reproducing the experiment
 def seed_reset():
     r1, r2, r3 = random.randint(0,2**32-1), random.randint(0,2**32-1), random.randint(0,2**32-1)
     torch.manual_seed(r1)
     np.random.seed(r2)
     random.seed(r3)
+    return r1, r2, r3
 
 
-#==============================================================================================
-#==============================================================================================
-#===================================SCRIPT FOR TRAINING========================================
-#==============================================================================================
-#==============================================================================================
+def extract_r1_r2_r3():
+    pattern = r'history_(\d+)_(\d+)_(\d+)\.csv'
+
+    # Iterate through the files in the given directory
+    for filename in os.listdir():
+        # Match the filename with the pattern
+        match = re.match(pattern, filename)
+        if match:
+            # Extract the numbers r1, r2, and r3 from the filename
+            return map(int, match.groups())
+    return None
 
 
+#write or append to the history log file
+class LogFile(object):
+    def __init__(self, log_name_main, log_name_opt):
+        self.log_name_main = log_name_main
+        self.log_name_opt = log_name_opt
+    def write(self, text):
+        with open(self.log_name_main, 'a+') as file:
+            file.write(text)
+    def write_opt(self, text):
+        with open(self.log_name_opt, 'a+') as file:
+            file.write(text)
+    def clean(self):
+        with open(self.log_name_main, 'w') as file:
+            file.write("step,return\n")
+        with open(self.log_name_opt, 'w') as file:
+            file.write("ep,return,steps,scale\n")
+
+
+numbers = extract_r1_r2_r3()
+
+if numbers != None:
+    # derive random numbers from history file
+    r1, r2, r3 = numbers
+else:
+    # generate new random seeds
+    r1, r2, r3 = seed_reset()
+
+
+
+print(r1, ", ", r2, ", ", r3)
+
+log_name_main = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".csv"
+log_name_opt = "episodes_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".csv"
+log_file = LogFile(log_name_main, log_name_opt)
+
+
+def save(algo, total_rewards, total_steps):
+
+    torch.save(algo.nets.online.state_dict(), 'nets_online_model.pt')
+    torch.save(algo.nets.target.state_dict(), 'nets_target_model.pt')
+    torch.save(algo.nets_optimizer.state_dict(), 'nets_optimizer.pt')
+    print("saving... the buffer length = ", algo.replay_buffer.length, end="")
+    with open('data', 'wb') as file:
+        pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.nets.q_next_ema, 'total_rewards': total_rewards, 'total_steps': total_steps}, file)
+    print(" > done")
+
+
+def load(algo, Q_learning):
+
+    total_rewards, total_steps = [], 0
+
+    try:
+        print("loading models...")
+        algo.nets.online.load_state_dict(torch.load('nets_online_model.pt', weights_only=True))
+        algo.nets.target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
+        algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt', weights_only=True))
+        print('models loaded')
+        sim_loop(env_valid, 100, True, False, algo, [], total_steps=0)
+    except:
+        print("problem during loading models")
+
+
+    try:
+        print("loading buffer...")
+        with open('data', 'rb') as file:
+            dict = pickle.load(file)
+            algo.replay_buffer = dict['buffer']
+            algo.nets.q_next_ema = dict['q_next_ema']
+            total_rewards = dict['total_rewards']
+            total_steps = dict['total_steps']
+            if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True
+        
+        print('buffer loaded, Q_ema', round(algo.nets.q_next_ema.item(), 2), ', average_reward = ', round(np.mean(total_rewards[-300:]), 2))
+        
+    except:
+        print("problem during loading buffer")
+
+    return Q_learning, total_rewards, total_steps
+
+#############################################
+# ---------------Parametres-----------------#
+#############################################
 
 #global parameters
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.cuda.empty_cache()
+
 print(device)
-learning_rate = 3e-4
-explore_time = 10240
+G = 3
+learning_rate = 5e-5
+explore_time, times = 20480, 25
+capacity = explore_time * times
+h_dim = capacity//1000
 limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
@@ -38,36 +139,19 @@ episode_rewards_all, episode_steps_all, test_rewards, Q_learning, total_steps = 
 
 # environment type.
 option = 3
-pre_valid = False
+pre_valid = True
+if option == 0: env_name = '"BipedalWalker-v3'
+elif option == 1: env_name = 'HalfCheetah-v4'
+elif option == 2: env_name = 'Walker2d-v4'
+elif option == 3: env_name = 'Humanoid-v4'
+elif option == 4: env_name = 'Ant-v4'
+elif option == 5: env_name = 'Swimmer-v4'
+elif option == 6: env_name = 'Hopper-v4'
+elif option == 7: env_name = 'Pusher-v4'
 
-if option == 1:
-    env = gym.make('HalfCheetah-v4')
-    env_test = gym.make('HalfCheetah-v4')
-
-elif option == 2:
-    env = gym.make('Walker2d-v4')
-    env_test = gym.make('Walker2d-v4')
-
-elif option == 3:
-    env = gym.make('Humanoid-v4')
-    env_test = gym.make('Humanoid-v4')
-    if pre_valid: env_test = gym.make('Humanoid-v4', render_mode="human")
-
-elif option == 4:
-    env = gym.make('Ant-v4')
-    env_test = gym.make('Ant-v4')
-
-elif option == 5:
-    env = gym.make('Swimmer-v4')
-    env_test = gym.make('Swimmer-v4')
-
-elif option == 6:
-    env = gym.make('Hopper-v4')
-    env_test = gym.make('Hopper-v4')
-
-elif option == 7:
-    env = gym.make('Pusher-v4')
-    env_test = gym.make('Pusher-v4')
+env = gym.make(env_name)
+env_test = gym.make(env_name)
+env_valid = gym.make(env_name, render_mode="human")
 
 state_dim = env.observation_space.shape[0]
 action_dim= env.action_space.shape[0]
@@ -76,164 +160,75 @@ max_action = torch.ones(action_dim)
 
 print("action_dim: ", action_dim, "state_dim: ", state_dim, "max_action:", max_action)
 
-algo = Symphony(state_dim, action_dim, device, max_action, learning_rate)
+algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate)
 
 
+# Loop for episodes:[ State -> Loop for one episode: [ Action, Next State, Reward, Done, State = Next State ] ]
+def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_steps):
 
 
-#==============================================================================================
-#==============================================================================================
-#==========================================TESTING=============================================
-#==============================================================================================
-#==============================================================================================
+    start_episode = len(total_rewards) + 1
 
-#testing model
-def testing(env, limit_step, test_episodes, current_step=0, save_log=False):
-    if test_episodes<1: return
-    print("Validation... ", test_episodes, " epsodes")
-    episode_return = []
 
-    for test_episode in range(test_episodes):
-
+    for episode in range(start_episode, episodes+1):
+            
+        Return = 0.0     
         state = env.reset()[0]
-        rewards = []
-
+        
         for steps in range(1,limit_step+1):
-            #seed_reset()
-            action, scale = algo.select_action(state, noise=True)
-            next_state, reward, done, truncated, info = env.step(action)
-            rewards.append(reward)
-            state = next_state
-            if done or truncated: break
-
-        episode_return.append(np.sum(rewards))
-
-        validate_return = np.mean(episode_return[-100:])
-        print(f"trial {test_episode+1}:, Rtrn = {episode_return[test_episode]:.2f}, Average 100 = {validate_return:.2f}, steps: {steps}")
-
-    if save_log: log_file.write(str(current_step) + " : " + str(round(validate_return.item(), 2)) +  "\n")
-
-
-#==============================================================================================
-#==============================================================================================
-#=====================LOADING EXISTING MODELS, BUFFER and PARAMETERS===========================
-#==============================================================================================
-#==============================================================================================
-
-
-
-def save_data_models():
-    print("saving data...")
-    torch.save(algo.nets.online.state_dict(), 'nets_model.pt')
-    torch.save(algo.nets.target.state_dict(), 'nets_target_model.pt')
-    torch.save(algo.nets_optimizer.state_dict(), 'nets_optimizer.pt')
-    with open('data', 'wb') as file:
-        pickle.dump({'buffer': algo.replay_buffer, 'q_next_ema': algo.nets.q_next_ema, 'eta': algo.nets.eta, 'episode_rewards_all':episode_rewards_all, 'episode_steps_all':episode_steps_all, 'total_steps': total_steps}, file)
-    print("...saved")
-
-
-try:
-    print("loading buffer...")
-    with open('data', 'rb') as file:
-        dict = pickle.load(file)
-        algo.replay_buffer = dict['buffer']
-        algo.nets.eta = dict['eta']
-        algo.nets.q_next_ema = dict['q_next_ema']
-        episode_rewards_all = dict['episode_rewards_all']
-        episode_steps_all = dict['episode_steps_all']
-        total_steps = dict['total_steps']
-        if len(algo.replay_buffer)>=explore_time and not Q_learning: Q_learning = True
-    print('buffer loaded, buffer length', len(algo.replay_buffer))
-
-    start_episode = len(episode_steps_all)
-
-except:
-    print("problem during loading buffer")
-
-
-try:
-    print("loading models...")
-    algo.nets.online.load_state_dict(torch.load('nets_model.pt', weights_only=True))
-    algo.nets.target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
-    print('models loaded')
-    if pre_valid: testing(env_test, limit_eval, 100)
-except:
-    print("problem during loading models")
-
-
-try:
-    algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt', weights_only=True))
-    print("optimizer loaded...")
-except:
-    print("problem during loading optimizer")
-#==============================================================================================
-#==============================================================================================
-#========================================EXPLORATION===========================================
-#==============================================================================================
-#==============================================================================================
-
-
-
-if not Q_learning:
-    log_file.clean()
-    
-
-    while not Q_learning:
-        rewards = []
-        state = env_test.reset()[0]
-
-        for steps in range(1, limit_step+1):
 
             seed_reset()
-            action, scale = algo.select_action(state)
-            next_state, reward, done, truncated, info = env_test.step(action)
-            rewards.append(reward)
-            if algo.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True; break
-            algo.replay_buffer.add(state, action, reward, next_state, done)
-            if done: break
+            total_steps += 1
+
+            # Activate training if explore time is reached and if it is not testing mode:
+            if testing:
+                Q_learning = False
+            else:
+                if algo.replay_buffer.length>=explore_time and not Q_learning:
+                    Q_learning = True
+                    algo.replay_buffer.norm_fill(times)
+                    print("started training")
+
+            # if total steps is divisible to 2500 save models, stop training and do testing, return to training:
+            if Q_learning and total_steps>=2500 and total_steps%2500==0:
+                save(algo, total_rewards, total_steps)
+                
+                print("start testing")
+                test_return = sim_loop(env_test, 25, True, Q_learning, algo, [], total_steps=0)
+                log_file.write(str(total_steps) + "," + str(round(test_return, 2)) + "\n")
+                print("end of testing")
+
+
+            # if steps is close to episode limit (e.g. 950) we shut down actions and leave noise to get Terminal Transition:
+            active = steps<(limit_step-50) if Q_learning else True
+            action = algo.select_action(state,  action=active, noise=not testing)
+            next_state, reward, done, truncated, info = env.step(action)
+            if not testing: algo.replay_buffer.add(state, action, reward, next_state, done)
+            Return += reward
+            
+            # actual training
+            if Q_learning: [scale := algo.train() for _ in range(G)]
+            if done or truncated: break
             state = next_state
 
-        Return = np.sum(rewards)
-        print(f" Rtrn = {Return:.2f}")
-
-    
-
-#==============================================================================================
-#==============================================================================================
-#=========================================TRAINING=============================================
-#==============================================================================================
-#==============================================================================================
-
-algo.norm_fill()
-
-for i in range(start_episode, num_episodes):
-
-    rewards = []
-    state = env.reset()[0]
-   
-
-    for steps in range(1, limit_step+1):
-        scale = algo.train()
-        seed_reset()
-
-        total_steps += 1
-
-        # save models, data
-        if (total_steps>=2500 and total_steps%2500==0):
-            testing(env_test, limit_step=limit_eval, test_episodes=25, current_step=total_steps, save_log=True)
-            if total_steps%2500==0: save_data_models()
 
 
-        action, _ = algo.select_action(state)
-        next_state, reward, done, truncated, info = env.step(action)
-        rewards.append(reward)
-        algo.replay_buffer.add(state, action, reward, next_state, done)
-        if done: break
-        state = next_state
+        total_rewards.append(Return)
+        average_reward = np.mean(total_rewards[-300:])
 
-    
-    episode_rewards_all.append(np.sum(rewards))
-    episode_steps_all.append(steps)
 
-    print(f"Ep {i}: Rtrn = {episode_rewards_all[-1]:.2f} | ep steps = {steps} | total_steps = {total_steps}  | scale = {scale.mean().item():.4f}  ")
-    log_file.write_opt(str(i) + " : " + str(round(episode_rewards_all[-1], 2)) + " : step : " + str(total_steps) + " : S : " + str(round(scale.mean().item(), 4)) + " : S list :" + str(np.round(scale.mean(dim=0).cpu().numpy(), decimals=3))  + "\n")
+        print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg = {average_reward:.2f}| ep steps = {steps} | total_steps = {total_steps}") 
+        if not testing and Q_learning: log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + str(round(scale.mean().item(), 4)) + "\n")
+        
+
+    return np.mean(total_rewards).item()
+
+
+
+
+# Loading existing models
+Q_learning, total_rewards, total_steps = load(algo, Q_learning)
+if not Q_learning: log_file.clean()
+
+# Training
+sim_loop(env, num_episodes, False, Q_learning, algo, total_rewards, total_steps)
