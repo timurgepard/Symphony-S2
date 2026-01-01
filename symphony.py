@@ -136,7 +136,7 @@ class FeedForward(jit.ScriptModule):
             nn.Linear(h_dim, h_dim),
             ReSine(h_dim),
             nn.Linear(h_dim, f_out),
-            GradientDropout(0.75)
+            GradientDropout(0.7)
         )
 
 
