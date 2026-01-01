@@ -11,7 +11,7 @@ import time
 import os, re
 
 # environment type.
-option = 3
+option = 6
 
 if option == 0: env_name = 'BipedalWalker-v3'
 elif option == 1: env_name = 'HalfCheetah-v4'
@@ -21,6 +21,12 @@ elif option == 4: env_name = 'Ant-v4'
 elif option == 5: env_name = 'Swimmer-v4'
 elif option == 6: env_name = 'Hopper-v4'
 elif option == 7: env_name = 'Pusher-v4'
+
+
+pre_valid = True # testing models when loaded
+env = gym.make(env_name)
+env_test = gym.make(env_name)
+env_valid = gym.make(env_name, render_mode="human")
 
 #############################################
 # -----------Helper Functions---------------#
@@ -107,7 +113,7 @@ def load(algo, Q_learning):
         algo.nets.target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
         algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt', weights_only=True))
         print('models loaded')
-        #sim_loop(env_valid, 100, True, False, algo, [], total_steps=0)
+        if pre_valid: sim_loop(env_valid, 100, True, False, algo, [], total_steps=0)
     except:
         print("problem during loading models")
 
@@ -150,10 +156,7 @@ start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning, total_steps = [], [], [], False, 0
 
 
-pre_valid = True
-env = gym.make(env_name)
-env_test = gym.make(env_name)
-env_valid = gym.make(env_name, render_mode="human")
+
 
 state_dim = env.observation_space.shape[0]
 action_dim= env.action_space.shape[0]
