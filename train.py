@@ -11,7 +11,7 @@ import time
 import os, re
 
 # environment type.
-option = 6
+option = 3
 
 if option == 0: env_name = 'BipedalWalker-v3'
 elif option == 1: env_name = 'HalfCheetah-v4'
