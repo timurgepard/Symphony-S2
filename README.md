@@ -3,6 +3,8 @@ Author's implementation of the
 
 # Symphony: A Heuristic Normalized Calibrated Advantage Actor and Critic Algorithm in application for Humanoid Robots
 
+paper: https://arxiv.org/abs/2512.10477
+
 (for my Mom, my Wife Saya and my sister Zhanna)
 
 The Symphony algorithm solves two conflicting problems of Reinforcement Learning: Sample Efficiency and harmonious humanoid agent movements in Model-Free Reinforcement Learning. 
