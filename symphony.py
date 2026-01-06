@@ -93,17 +93,18 @@ class ReSine(jit.ScriptModule):
         x = s*torch.sin(x/s)
         return x/(1+torch.exp(-1.5*x/s))
 
-#SilentDropout
+#GradientDropout
 # nn.Module -> JIT C++ graph
 class GradientDropout(jit.ScriptModule):
-    def __init__(self, p=0.5):
-        super(GradientDropout, self).__init__()
-        self.p = p
+    def __init__(self):
+        super().__init__()
 
     @jit.script_method
     def forward(self, x):
-        mask = (torch.rand_like(x) > self.p).float()
-        return  mask * x + (1.0-mask) * x.detach()
+        p = torch.sigmoid(torch.randn_like(x))
+        mask = (torch.rand_like(x) > p).float()
+        return mask * x + (1.0 - mask) * x.detach()
+
 
 
 class Swaddling(jit.ScriptModule):
@@ -136,7 +137,7 @@ class FeedForward(jit.ScriptModule):
             nn.Linear(h_dim, h_dim),
             ReSine(h_dim),
             nn.Linear(h_dim, f_out),
-            GradientDropout(0.7)
+            GradientDropout()
         )
 
 
