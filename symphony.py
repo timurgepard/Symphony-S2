@@ -98,10 +98,11 @@ class ReSine(jit.ScriptModule):
 class GradientDropout(jit.ScriptModule):
     def __init__(self):
         super().__init__()
+        self.std = 1/math.e
 
     @jit.script_method
     def forward(self, x):
-        p = torch.sigmoid(torch.randn_like(x).clamp(-math.e, math.e))
+        p = torch.sigmoid(self.std * torch.randn_like(x).clamp(-math.e, math.e))
         mask = (torch.rand_like(x) > p).float()
         return mask * x + (1.0 - mask) * x.detach()
 
