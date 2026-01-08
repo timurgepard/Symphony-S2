@@ -101,7 +101,7 @@ class GradientDropout(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x):
-        p = torch.sigmoid(torch.randn_like(x))
+        p = torch.sigmoid(torch.randn_like(x).clamp(-math.e, math.e))
         mask = (torch.rand_like(x) > p).float()
         return mask * x + (1.0 - mask) * x.detach()
 
