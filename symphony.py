@@ -103,6 +103,7 @@ class GradientDropout(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x):
+        print(self.p[0])
         p = torch.sigmoid(self.p)
         mask = (torch.rand_like(x) > p).float()
         return mask * x + (1.0 - mask) * x.detach()
@@ -375,5 +376,6 @@ class ReplayBuffer:
         self.probs =  weights/torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
 
 
