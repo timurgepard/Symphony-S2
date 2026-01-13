@@ -136,7 +136,7 @@ class FeedForward(jit.ScriptModule):
             nn.Linear(h_dim, h_dim),
             ReSine(h_dim),
             nn.Linear(h_dim, f_out),
-            GradientDropout(f_out)
+            GradientDropout()
         )
 
 
@@ -372,6 +372,7 @@ class ReplayBuffer:
         self.probs =  weights/torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
 
 
 
