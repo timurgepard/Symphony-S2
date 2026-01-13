@@ -320,6 +320,7 @@ class ReplayBuffer:
 
         if self.length>=self.capacity:
             shift = 2 if self.not_dones_gamma[0,:].item() == 0.0 else 1
+            if shift == 2: self.not_dones_gamma[0,:] += 1e-8
             self.states = torch.roll(self.states, shifts=-shift, dims=0)
             self.actions = torch.roll(self.actions, shifts=-shift, dims=0)
             self.rewards = torch.roll(self.rewards, shifts=-shift, dims=0)
@@ -373,3 +374,4 @@ class ReplayBuffer:
         self.probs =  weights/torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
