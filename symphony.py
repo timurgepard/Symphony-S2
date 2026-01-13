@@ -96,12 +96,12 @@ class ReSine(jit.ScriptModule):
 #GradientDropout
 # nn.Module -> JIT C++ graph
 class GradientDropout(jit.ScriptModule):
-    def __init__(self, hidden_dim=256):
+    def __init__(self):
         super().__init__()
 
     @jit.script_method
     def forward(self, x):
-        mask = (torch.rand_like(x) > torch.sigmoid((torch.randn_like(x))).float()
+        mask = (torch.rand_like(x) > torch.sigmoid(torch.randn_like(x))).float()
         return mask * x + (1.0 - mask) * x.detach()
 
 
@@ -372,6 +372,7 @@ class ReplayBuffer:
         self.probs =  weights/torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
 
 
 
