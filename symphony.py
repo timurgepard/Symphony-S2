@@ -98,13 +98,10 @@ class ReSine(jit.ScriptModule):
 class GradientDropout(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super().__init__()
-        k = 1/math.sqrt(hidden_dim)
-        self.p = nn.Parameter(data=2.0*k*torch.rand(hidden_dim)-k, requires_grad=True)
 
     @jit.script_method
     def forward(self, x):
-        p = torch.sigmoid(self.p)
-        mask = (torch.rand_like(x) > p).float()
+        mask = (torch.rand_like(x) > torch.sigmoid((torch.randn_like(x))).float()
         return mask * x + (1.0 - mask) * x.detach()
 
 
@@ -375,6 +372,7 @@ class ReplayBuffer:
         self.probs =  weights/torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
 
 
 
