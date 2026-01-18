@@ -99,9 +99,11 @@ class GradientDropout(jit.ScriptModule):
     def __init__(self):
         super().__init__()
 
+
     @jit.script_method
     def forward(self, x):
-        mask = (torch.rand_like(x) > torch.sigmoid(torch.randn_like(x))).float()
+        p =  torch.sigmoid(torch.randn_like(x))
+        mask = (torch.rand_like(x) > p).float()
         return mask * x + (1.0 - mask) * x.detach()
 
 
@@ -171,7 +173,7 @@ class ActorCritic(jit.ScriptModule):
 
         self.q_dist = q_nodes*len(self.qnets)
         indexes = torch.arange(0, self.q_dist, 1)/self.q_dist
-        weights = torch.tanh((math.pi*(1-indexes))**math.pi) - 0.02*torch.exp(-(indexes/0.02)**2)
+        weights = torch.tanh((math.pi*(1-indexes))**math.e) #- 0.02*torch.exp(-(indexes/0.02)**2)
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.e = 1e-3
@@ -228,7 +230,7 @@ class Nets(jit.ScriptModule):
 
 
     @jit.script_method
-    def forward(self, state, action, reward, next_state, not_done_gamma):
+    def loss(self, state, action, reward, next_state, not_done_gamma):
 
         next_action, next_scale, next_beta = self.online.actor(next_state)
         q_next_target, q_next_target_value = self.target.critic_soft(next_state, next_action)
@@ -236,10 +238,11 @@ class Nets(jit.ScriptModule):
         q_pred = self.online.critic(state, action)
 
         q_next_ema = self.alpha * self.q_next_ema + self.alpha_ * q_next_target_value
-        nets_loss = -self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.rehse(q_pred-q_target) + self.sw(next_scale, next_beta) 
+        net_loss = -self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.rehse(q_pred-q_target) + self.sw(next_scale, next_beta) 
         self.q_next_ema = q_next_ema.mean()
 
-        return nets_loss, next_scale.detach()
+        return net_loss
+        
 
 
 
@@ -277,14 +280,10 @@ class Symphony(object):
         state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample(self.batch_size)
         self.nets_optimizer.zero_grad(set_to_none=True)
         
-        nets_loss, scale = self.nets(state, action, reward, next_state, not_done_gamma)
+        self.nets.loss(state, action, reward, next_state, not_done_gamma).backward()
 
-        nets_loss.backward()
         self.nets_optimizer.step()
         self.nets.tau_update()
-
-        return scale
-
 
 
 
@@ -317,7 +316,7 @@ class ReplayBuffer:
         self.not_dones_gamma[idx,:] = torch.tensor([0.99 * (1.0 - float(done))], dtype=torch.float32, device=self.device)
 
         if self.length>=self.capacity:
-            shift = 2 if self.not_dones_gamma[0,:].item() == 0.0 else 1
+            shift = 2 if self.not_dones_gamma[0,:].item() <= 3e-8 else 1
             if shift == 2: self.not_dones_gamma[0,:] += 1e-8
             self.states = torch.roll(self.states, shifts=-shift, dims=0)
             self.actions = torch.roll(self.actions, shifts=-shift, dims=0)
@@ -368,14 +367,7 @@ class ReplayBuffer:
         self.length = times*self.length
 
         indexes = torch.arange(0, self.length, 1)/self.length
-        weights = torch.tanh((math.pi*indexes)**math.pi) - 0.02*torch.exp(-((indexes-1)/0.02)**2)
+        weights = torch.tanh((math.pi*indexes)**math.e) #- 0.02*torch.exp(-((indexes-1)/0.02)**2)
         self.probs =  weights/torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
-
-
-
-
-
-
-
