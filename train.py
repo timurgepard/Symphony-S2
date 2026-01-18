@@ -23,7 +23,7 @@ elif option == 6: env_name = 'Hopper-v4'
 elif option == 7: env_name = 'Pusher-v4'
 
 
-pre_valid = True # testing models when loaded
+pre_valid = False # testing models when loaded
 env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
@@ -76,15 +76,8 @@ class LogFile(object):
 
 numbers = extract_r1_r2_r3()
 
-if numbers != None:
-    # derive random numbers from history file
-    r1, r2, r3 = numbers
-else:
-    # generate new random seeds
-    r1, r2, r3 = seed_reset()
-
-
-
+#derive random numbers from history file or generate new random seeds
+r1, r2, r3 = numbers if numbers != None else seed_reset()
 print(r1, ", ", r2, ", ", r3)
 
 log_name_main = "history_" + str(r1) + "_" + str(r2) + "_" + str(r3) + ".csv"
@@ -144,8 +137,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-G = 3
-learning_rate = 5e-5
+N_step = 3 # each N step do N updates
+learning_rate = 1e-4
 explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = capacity//1000
@@ -163,7 +156,8 @@ action_dim= env.action_space.shape[0]
 #max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
 max_action = torch.ones(action_dim)
 
-print("action_dim: ", action_dim, "state_dim: ", state_dim, "max_action:", max_action)
+print("action_dim: ", action_dim, "state_dim: ", state_dim)
+print("max_action:", max_action)
 
 algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate)
 
@@ -212,7 +206,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_step
             Return += reward
             
             # actual training
-            if Q_learning: [scale := algo.train() for _ in range(G)]
+            if Q_learning and steps%N_step==0: [algo.train() for _ in range(N_step)]
             if done or truncated: break
             state = next_state
 
@@ -223,7 +217,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_step
 
 
         print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| ep steps = {steps} | total_steps = {total_steps}") 
-        if not testing and Q_learning: log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + str(round(scale.mean().item(), 4)) + "\n")
+        if not testing and Q_learning: log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + "\n")
         
 
     return np.mean(total_rewards).item()
