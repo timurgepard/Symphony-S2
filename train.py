@@ -138,7 +138,7 @@ torch.cuda.empty_cache()
 
 print(device)
 N_step = 4 # each N step do N updates
-learning_rate = 1e-4
+learning_rate = 5e-5
 explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = capacity//1000
