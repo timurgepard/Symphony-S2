@@ -137,7 +137,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-N_step = 3 # each N step do N updates
+N_step = 4 # each N step do N updates
 learning_rate = 1e-4
 explore_time, times = 20480, 25
 capacity = explore_time * times
