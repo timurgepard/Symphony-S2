@@ -20,7 +20,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-N_step = 3 # each N step do N updates
+G = 3 # each N step do N updates
 learning_rate = 1e-4
 explore_time, times = 20480, 25
 capacity = explore_time * times
@@ -209,7 +209,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_step
             Return += reward
             
             # actual training
-            if Q_learning and steps%N_step==0: [algo.train() for _ in range(N_step)]
+            if Q_learning: [algo.train() for _ in range(G)]
             if done or truncated: break
             state = next_state
 
