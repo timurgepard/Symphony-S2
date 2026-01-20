@@ -20,8 +20,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-G = 3 # update-to-data
-learning_rate = 5e-5
+N_step = 3 # each N step do N updates
+learning_rate = 1e-4
 explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = capacity//1000
@@ -48,20 +48,6 @@ pre_valid = True # testing models when loaded
 env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
-
-
-state_dim = env.observation_space.shape[0]
-action_dim= env.action_space.shape[0]
-#max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
-max_action = torch.ones(action_dim)
-
-print("state_dim: ", state_dim)
-print("action_dim: ", action_dim)
-print("max_action:", max_action)
-
-algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate)
-
-
 
 #############################################
 # -----------Helper Functions---------------#
@@ -168,10 +154,15 @@ def load(algo, Q_learning):
 
 
 
+state_dim = env.observation_space.shape[0]
+action_dim= env.action_space.shape[0]
+#max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
+max_action = torch.ones(action_dim)
 
-#############################################
-# ------------Simulation Loop---------------#
-#############################################
+print("action_dim: ", action_dim, "state_dim: ", state_dim)
+print("max_action:", max_action)
+
+algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate)
 
 
 # Loop for episodes:[ State -> Loop for one episode: [ Action, Next State, Reward, Done, State = Next State ] ]
@@ -218,7 +209,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_step
             Return += reward
             
             # actual training
-            if Q_learning: [algo.train() for _ in range(G)]
+            if Q_learning and steps%N_step==0: [algo.train() for _ in range(N_step)]
             if done or truncated: break
             state = next_state
 
