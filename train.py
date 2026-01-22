@@ -20,9 +20,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-G = 1 # do G updates per step, 3 in paper, 1 for old PCs
+G = 1 # each N step do N updates
 learning_rate = 1e-4
-explore_time, times = 20480, 25
+explore_time, times = 25600, 30
 capacity = explore_time * times
 h_dim = capacity//1000
 limit_step = 1000 #max steps per episode
