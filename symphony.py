@@ -305,12 +305,11 @@ class ReplayBuffer:
 
     def add(self, state, action, reward, next_state, done):
 
-        if self.length < self.capacity: self.length += 1
-            
-        if self.length >= self.capacity:
-            if self.not_dones_gamma[self.ptr].item() <= 3e-8:
-                self.not_dones_gamma[self.ptr] += 1e-8
-                self.ptr = (self.ptr + 1) % self.capacity
+        if self.length < self.capacity:
+            self.length += 1
+        elif self.not_dones_gamma[self.ptr].item() <= 3e-8:
+            self.not_dones_gamma[self.ptr] += 1e-8
+            self.ptr = (self.ptr + 1) % self.capacity
 
         idx = self.ptr 
 
