@@ -20,7 +20,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-G = 1 # update-to-data ratio, 3 in paper, 1 for old PCs
+G = 1 # do G updates per step, 3 in paper, 1 for old PCs
 learning_rate = 1e-4
 explore_time, times = 20480, 25
 capacity = explore_time * times
