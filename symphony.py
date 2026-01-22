@@ -97,7 +97,7 @@ class ReSine(jit.ScriptModule):
 # nn.Module -> JIT C++ graph
 class GradientDropout(jit.ScriptModule):
     def __init__(self):
-        super().__init__()
+        super(GradientDropout, self).__init__()
 
 
     @jit.script_method
@@ -269,7 +269,7 @@ class Symphony(object):
     """
     def select_action(self, state,  action = True, noise=True):
         with torch.no_grad(): return self.nets.online.actor(state, action, noise)[0]
-	"""
+    """
 
 
 
