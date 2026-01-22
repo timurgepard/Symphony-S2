@@ -326,7 +326,7 @@ class ReplayBuffer:
     def sample(self, batch_size):
 
         indices = torch.multinomial(self.probs, num_samples=batch_size, replacement=True) # fixed indexes
-        indices = (self.ptr + indices) % self.capacity #
+        indices.add_(self.ptr).remainder_(self.capacity)
 
         return (
             self.states[indices],
