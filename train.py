@@ -22,9 +22,9 @@ torch.cuda.empty_cache()
 print(device)
 G = 1 # each N step do N updates
 learning_rate = 1e-4
-explore_time, times = 20480, 25
+explore_time, times = 25600, 30
 capacity = explore_time * times
-h_dim = capacity//1000
+h_dim = capacity//1500
 limit_step = 1000 #max steps per episode
 limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
