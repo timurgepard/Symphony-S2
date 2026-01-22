@@ -301,34 +301,33 @@ class ReplayBuffer:
         self.not_dones_gamma = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
 
         self.norm = 1.0
-
+        self.ptr = 0
 
     def add(self, state, action, reward, next_state, done):
 
-        if self.length<self.capacity: self.length += 1
+        if self.length < self.capacity: self.length += 1
+            
+        if self.length >= self.capacity:
+            if self.not_dones_gamma[self.ptr].item() <= 3e-8:
+                self.not_dones_gamma[self.ptr] += 1e-8
+                self.ptr = (self.ptr + 1) % self.capacity
 
-        idx = self.length-1
+        idx = self.ptr 
 
-        self.states[idx,:] = torch.tensor(state, dtype=torch.float32, device=self.device)
-        self.actions[idx,:] = torch.tensor(action, dtype=torch.float32, device=self.device)
-        self.rewards[idx,:] = torch.tensor([reward/self.norm], dtype=torch.float32, device=self.device)
-        self.next_states[idx,:] = torch.tensor(next_state, dtype=torch.float32, device=self.device)
-        self.not_dones_gamma[idx,:] = torch.tensor([0.99 * (1.0 - float(done))], dtype=torch.float32, device=self.device)
+        # direct assignment to stay in-place
+        self.states[idx] = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+        self.actions[idx] = torch.as_tensor(action, dtype=torch.float32, device=self.device)
+        self.rewards[idx] = torch.as_tensor([reward / self.norm], dtype=torch.float32, device=self.device)
+        self.next_states[idx] = torch.as_tensor(next_state, dtype=torch.float32, device=self.device)
+        self.not_dones_gamma[idx] = torch.as_tensor([0.99 * (1.0 - float(done))], dtype=torch.float32, device=self.device)
 
-        if self.length>=self.capacity:
-            shift = 2 if self.not_dones_gamma[0,:].item() <= 3e-8 else 1
-            if shift == 2: self.not_dones_gamma[0,:] += 1e-8
-            self.states = torch.roll(self.states, shifts=-shift, dims=0)
-            self.actions = torch.roll(self.actions, shifts=-shift, dims=0)
-            self.rewards = torch.roll(self.rewards, shifts=-shift, dims=0)
-            self.next_states = torch.roll(self.next_states, shifts=-shift, dims=0)
-            self.not_dones_gamma = torch.roll(self.not_dones_gamma, shifts=-shift, dims=0)
-
-
+        # advance pointer
+        self.ptr = (self.ptr + 1) % self.capacity
 
     def sample(self, batch_size):
 
-        indices = torch.multinomial(self.probs, num_samples=batch_size, replacement=True)
+        indices = torch.multinomial(self.probs, num_samples=batch_size, replacement=True) # fixed indexes
+        indices = (self.ptr + indices) % self.capacity #
 
         return (
             self.states[indices],
@@ -349,25 +348,37 @@ class ReplayBuffer:
     #==============================================================
     #==============================================================
 
-    def norm_fill(self, times:int):
+    def _inplace_repeat(self, original_len, times):
+        current_idx = original_len
+        for _ in range(1, times):
+            space_left = self.capacity - current_idx
+            if space_left <= 0: break
+            
+            copy_size = min(original_len, space_left)
+            
+            self.states[current_idx : current_idx + copy_size] = self.states[:copy_size]
+            self.actions[current_idx : current_idx + copy_size] = self.actions[:copy_size]
+            self.rewards[current_idx : current_idx + copy_size] = self.rewards[:copy_size]
+            self.next_states[current_idx : current_idx + copy_size] = self.next_states[:copy_size]
+            self.not_dones_gamma[current_idx : current_idx + copy_size] = self.not_dones_gamma[:copy_size]
+            
+            current_idx += copy_size
+        return current_idx
 
+    def norm_fill(self, times: int):
 
         print("copying replay data, current length", self.length)
 
-        self.states = self.states[:self.length].repeat(times, 1)
-        self.actions = self.actions[:self.length].repeat(times, 1)
-        self.rewards = self.rewards[:self.length].repeat(times, 1)
-        self.next_states = self.next_states[:self.length].repeat(times, 1)
-        self.not_dones_gamma = self.not_dones_gamma[:self.length].repeat(times, 1)
+        self.norm = torch.mean(torch.abs(self.rewards[:self.length])).item()
+        self.rewards[:self.length] /= self.norm
 
-        self.norm = torch.mean(torch.abs(self.rewards)).item()
+        self._inplace_repeat(self.length, times)
+        
+        self.length = self.capacity
+        self.ptr = 0
 
-        self.rewards /= self.norm
-
-        self.length = times*self.length
-
-        indexes = torch.arange(0, self.length, 1)/self.length
-        weights = torch.tanh((math.pi*indexes)**math.e) - 0.02*torch.exp(-((indexes-1)/0.02)**2)
-        self.probs =  weights/torch.sum(weights)
+        indexes = torch.arange(0, self.length, 1, device=self.device) / self.length
+        weights = torch.tanh((math.pi * indexes) ** math.e) - 0.02 * torch.exp(-((indexes - 1) / 0.02) ** 2)
+        self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
