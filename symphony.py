@@ -173,7 +173,7 @@ class ActorCritic(jit.ScriptModule):
 
         self.q_dist = q_nodes*len(self.qnets)
         indexes = torch.arange(0, self.q_dist, 1)/self.q_dist
-        weights = torch.tanh((math.pi*(1-indexes))**math.e) - 0.02*torch.exp(-(indexes/0.02)**2)
+        weights = torch.tanh((math.pi*(1-indexes))**math.e) - 0.03*torch.exp(-(indexes/0.03)**2)
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.e = 1e-3
@@ -375,7 +375,8 @@ class ReplayBuffer:
         self.ptr = 0
 
         indexes = torch.arange(0, self.length, 1, device=self.device) / self.length
-        weights = torch.tanh((math.pi * indexes) ** math.e) - 0.02 * torch.exp(-((indexes - 1) / 0.02) ** 2)
+        weights = torch.tanh((math.pi * indexes) ** math.e) - 0.03 * torch.exp(-((indexes - 1) / 0.03) ** 2)
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
