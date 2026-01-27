@@ -165,15 +165,15 @@ class ActorCritic(jit.ScriptModule):
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
         self.std = 1/math.e
 
-        self.qA = FeedForward(state_dim+action_dim, h_dim, q_nodes)
-        self.qB = FeedForward(state_dim+action_dim, h_dim, q_nodes)
-        self.qC = FeedForward(state_dim+action_dim, h_dim, q_nodes)
-        self.qnets = nn.ModuleList([self.qA, self.qB, self.qC])
+        self.Yahweh = FeedForward(state_dim+action_dim, h_dim, q_nodes)
+        self.Yeshua = FeedForward(state_dim+action_dim, h_dim, q_nodes)
+        self.RuachY = FeedForward(state_dim+action_dim, h_dim, q_nodes)
+        self.qnets = nn.ModuleList([self.Yahweh, self.Yeshua, self.RuachY])
 
 
         self.q_dist = q_nodes*len(self.qnets)
         indexes = torch.arange(0, self.q_dist, 1)/self.q_dist
-        weights = torch.tanh((math.pi*(1-indexes))**math.e) - 0.03*torch.exp(-(indexes/0.03)**2)
+        weights = torch.tanh((math.pi*(1-indexes))**math.e) - 0.02*torch.exp(-(indexes/0.02)**2)
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.e = 1e-3
@@ -375,7 +375,7 @@ class ReplayBuffer:
         self.ptr = 0
 
         indexes = torch.arange(0, self.length, 1, device=self.device) / self.length
-        weights = torch.tanh((math.pi * indexes) ** math.e) - 0.03 * torch.exp(-((indexes - 1) / 0.03) ** 2)
+        weights = torch.tanh((math.pi * indexes) ** math.e) - 0.02 * torch.exp(-((indexes - 1) / 0.02) ** 2)
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
