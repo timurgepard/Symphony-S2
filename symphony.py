@@ -293,15 +293,16 @@ class ReplayBuffer:
     def __init__(self, capacity, state_dim, action_dim, device):
 
         self.capacity, self.length, self.device, self.norm, self.ptr = capacity, 0, device, 1.0, 0
+        self.action_dim, self.state_dim = action_dim, state_dim
 
 
-    def init(self, state_dim, action_dim, device):
+    def init(self, ):
 
-        self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
-        self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
-        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
-        self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
-        self.not_dones_gamma = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
+        self.states = torch.zeros((self.capacity, self.state_dim), dtype=torch.float32, device=self.device)
+        self.actions = torch.zeros((self.capacity, self.action_dim), dtype=torch.float32, device=self.device)
+        self.rewards = torch.zeros((self.capacity, 1), dtype=torch.float32, device=self.device)
+        self.next_states = torch.zeros((self.capacity, self.state_dim), dtype=torch.float32, device=self.device)
+        self.not_dones_gamma = torch.zeros((self.capacity, 1), dtype=torch.float32, device=self.device)
 
 
     def add(self, state, action, reward, next_state, done):
