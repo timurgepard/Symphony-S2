@@ -20,9 +20,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-G = 3 # update-to-data ratio
+G = 1 # update-to-data ratio
 learning_rate = 1e-4
-explore_time, times = 20480, 25
+explore_time, times = 20480, 50
 capacity = explore_time * times
 h_dim = capacity//1000
 limit_step = 1000 #max steps per episode
@@ -44,7 +44,7 @@ elif option == 6: env_name = 'Hopper-v4'
 elif option == 7: env_name = 'Pusher-v4'
 
 
-pre_valid = True # testing models when loaded
+pre_valid = False # testing models when loaded
 env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
@@ -230,7 +230,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_step
 
 # Loading existing models
 Q_learning, total_rewards, total_steps = load(algo, Q_learning)
-if not Q_learning: log_file.clean()
+if not Q_learning: log_file.clean(); algo.replay_buffer.init()
 
 # Training
 sim_loop(env, num_episodes, False, Q_learning, algo, total_rewards, total_steps)
