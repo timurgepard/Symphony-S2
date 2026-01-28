@@ -296,7 +296,7 @@ class ReplayBuffer:
         self.action_dim, self.state_dim = action_dim, state_dim
 
 
-    def init(self, ):
+    def init(self):
 
         self.states = torch.zeros((self.capacity, self.state_dim), dtype=torch.float32, device=self.device)
         self.actions = torch.zeros((self.capacity, self.action_dim), dtype=torch.float32, device=self.device)
