@@ -159,16 +159,16 @@ class ActorCritic(jit.ScriptModule):
 
 
         self.action_dim = action_dim
-        q_nodes = h_dim//4
+        q_nodes = h_dim//6
 
-        self.a = FeedForward(state_dim, h_dim, 3*action_dim)
+        self.a = FeedForward(state_dim, h_dim, 3*action_dim) #3 parts in 1
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
         self.std = 1/math.e
 
         self.Yahweh = FeedForward(state_dim+action_dim, h_dim, q_nodes)
         self.Yeshua = FeedForward(state_dim+action_dim, h_dim, q_nodes)
         self.RuachY = FeedForward(state_dim+action_dim, h_dim, q_nodes)
-        self.qnets = nn.ModuleList([self.Yahweh, self.Yeshua, self.RuachY])
+        self.qnets = nn.ModuleList([self.Yahweh, self.Yeshua, self.RuachY]) #3 directors in 1
 
 
         self.q_dist = q_nodes*len(self.qnets)
@@ -292,7 +292,10 @@ class Symphony(object):
 class ReplayBuffer:
     def __init__(self, capacity, state_dim, action_dim, device):
 
-        self.capacity, self.length, self.device = capacity, 0, device
+        self.capacity, self.length, self.device, self.norm, self.ptr = capacity, 0, device, 1.0, 0
+
+
+    def init(self, state_dim, action_dim, device):
 
         self.states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.actions = torch.zeros((self.capacity, action_dim), dtype=torch.float32, device=device)
@@ -300,8 +303,6 @@ class ReplayBuffer:
         self.next_states = torch.zeros((self.capacity, state_dim), dtype=torch.float32, device=device)
         self.not_dones_gamma = torch.zeros((self.capacity, 1), dtype=torch.float32, device=device)
 
-        self.norm = 1.0
-        self.ptr = 0
 
     def add(self, state, action, reward, next_state, done):
 
