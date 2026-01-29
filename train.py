@@ -22,7 +22,7 @@ torch.cuda.empty_cache()
 print(device)
 G = 1 # update-to-data ratio
 learning_rate = 1e-4
-explore_time, times = 20480, 50
+explore_time, times = 15360, 50
 capacity = explore_time * times
 h_dim = capacity//1000
 limit_step = 1000 #max steps per episode
@@ -159,11 +159,15 @@ action_dim= env.action_space.shape[0]
 #max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
 max_action = torch.ones(action_dim)
 
-print("action_dim: ", action_dim, "state_dim: ", state_dim)
-print("max_action:", max_action)
+
 
 algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate)
 
+
+print("action_dim: ", action_dim, "state_dim: ", state_dim)
+print("max_action:", max_action)
+print("h_dim", h_dim)
+print("batch_size", algo.nets.online.q_dist)
 
 # Loop for episodes:[ State -> Loop for one episode: [ Action, Next State, Reward, Done, State = Next State ] ]
 def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_steps):
