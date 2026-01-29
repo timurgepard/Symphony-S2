@@ -159,7 +159,7 @@ class ActorCritic(jit.ScriptModule):
 
 
         self.action_dim = action_dim
-        q_nodes = h_dim//6
+        q_nodes = h_dim//8
 
         self.a = FeedForward(state_dim, h_dim, 3*action_dim) #3 parts in 1
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
@@ -381,3 +381,4 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
