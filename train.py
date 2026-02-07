@@ -20,9 +20,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-G = 1 # update-to-data ratio
-learning_rate = 1e-4
-explore_time, times = 15360, 50
+G = 4 # update-to-data ratio
+learning_rate = 5e-5
+explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = capacity//1000
 limit_step = 1000 #max steps per episode
