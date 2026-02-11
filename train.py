@@ -7,8 +7,8 @@ import torch
 import numpy as np
 import random
 import pickle
-import time
 import os, re
+import time
 
 
 #############################################
@@ -16,38 +16,46 @@ import os, re
 #############################################
 
 #global parameters
+laptop = True*0.03 # if laptop => 0.01 delay between updates
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-G = 4 # update-to-data ratio
-learning_rate = 5e-5
+G = 1 # update-to-data ratio
+learning_rate = 1e-4
 explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = capacity//1000
-limit_step = 1000 #max steps per episode
-limit_eval = 1000 #max steps per evaluation
 num_episodes = 1000000
 start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning, total_steps = [], [], [], False, 0
 
 # environment type.
-option = 3
-
-if option == 0: env_name = 'BipedalWalker-v3'
-elif option == 1: env_name = 'HalfCheetah-v4'
-elif option == 2: env_name = 'Walker2d-v4'
-elif option == 3: env_name = 'Humanoid-v4'
-elif option == 4: env_name = 'Ant-v4'
-elif option == 5: env_name = 'Swimmer-v4'
-elif option == 6: env_name = 'Hopper-v4'
-elif option == 7: env_name = 'Pusher-v4'
+env_name = 'Humanoid-v4'
 
 
 pre_valid = False # testing models when loaded
 env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
+
+
+state_dim = env.observation_space.shape[0]
+action_dim= env.action_space.shape[0]
+#max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
+max_action = torch.ones(action_dim)
+
+
+algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate)
+
+
+print("action_dim: ", action_dim, "state_dim: ", state_dim)
+print("max_action:", max_action)
+print("h_dim", h_dim)
+print("batch_size", algo.nets.online.q_dist)
+
+limit_step = algo.nets.online.q_dist #max steps per episode
+limit_eval = 1000 #max steps per evaluation
 
 #############################################
 # -----------Helper Functions---------------#
@@ -127,7 +135,7 @@ def load(algo, Q_learning):
         algo.nets.target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
         algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt', weights_only=True))
         print('models loaded')
-        if pre_valid: sim_loop(env_valid, 100, True, False, algo, [], total_steps=0)
+        if pre_valid: sim_loop(env_valid, 100, True, False, algo, [], total_steps=0, limit_step=limit_eval)
     except:
         print("problem during loading models")
 
@@ -154,23 +162,10 @@ def load(algo, Q_learning):
 
 
 
-state_dim = env.observation_space.shape[0]
-action_dim= env.action_space.shape[0]
-#max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
-max_action = torch.ones(action_dim)
 
-
-
-algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate)
-
-
-print("action_dim: ", action_dim, "state_dim: ", state_dim)
-print("max_action:", max_action)
-print("h_dim", h_dim)
-print("batch_size", algo.nets.online.q_dist)
 
 # Loop for episodes:[ State -> Loop for one episode: [ Action, Next State, Reward, Done, State = Next State ] ]
-def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_steps):
+def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_steps, limit_step):
 
 
     start_episode = len(total_rewards) + 1
@@ -200,7 +195,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_step
                 if total_steps%10000==0: save(algo, total_rewards, total_steps)
                 
                 print("start testing")
-                test_return = sim_loop(env_test, 25, True, Q_learning, algo, [], total_steps=0)
+                test_return = sim_loop(env_test, 25, True, Q_learning, algo, [], total_steps=0, limit_step=limit_eval)
                 log_file.write(str(total_steps) + "," + str(round(test_return, 2)) + "\n")
                 print("end of testing")
 
@@ -213,7 +208,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_step
             Return += reward
             
             # actual training
-            if Q_learning: [algo.train() for _ in range(G)]
+            if Q_learning: [algo.train() for _ in range(G)]; #time.sleep(laptop)
             if done or truncated: break
             state = next_state
 
@@ -237,4 +232,4 @@ Q_learning, total_rewards, total_steps = load(algo, Q_learning)
 if not Q_learning: log_file.clean(); algo.replay_buffer.init()
 
 # Training
-sim_loop(env, num_episodes, False, Q_learning, algo, total_rewards, total_steps)
+sim_loop(env, num_episodes, False, Q_learning, algo, total_rewards, total_steps, limit_step)
