@@ -5,7 +5,9 @@ import math
 import torch.jit as jit
 import random
 
-
+# global constants:
+phi = (math.sqrt(5)+1)/2
+phi_ = 1/phi
 
 #==============================================================================================
 #==============================================================================================
@@ -15,7 +17,7 @@ import random
 
 
 class Adam(optim.Optimizer):
-    def __init__(self, params, lr=3e-4, weight_decay=0.01, betas=((math.sqrt(5)-1)/2, 0.995)):
+    def __init__(self, params, lr=3e-4, weight_decay=0.01, betas=(phi_, 0.995)):
         defaults = dict(lr=lr, betas=betas)
         super().__init__(params, defaults)
         self.wd = weight_decay
@@ -53,9 +55,6 @@ class Adam(optim.Optimizer):
                 
 
 
-
-
-
 #Rectified Huber Symmetric Error Loss Function via JIT Module
 # nn.Module -> JIT C++ graph
 class ReHSE(jit.ScriptModule):
@@ -67,6 +66,7 @@ class ReHSE(jit.ScriptModule):
         return (e * torch.tanh(e/2)).mean()
 
 
+
 #Rectified Huber Asymmetric Error Loss Function via JIT Module
 # nn.Module -> JIT C++ graph
 class ReHAE(jit.ScriptModule):
@@ -76,7 +76,10 @@ class ReHAE(jit.ScriptModule):
     @jit.script_method
     def forward(self, e):
         return (torch.abs(e) * torch.tanh(e/2)).mean()
-    
+
+
+
+
 
 
 #ReSine Activation Function
@@ -111,6 +114,7 @@ class GradientDropout(jit.ScriptModule):
 class Swaddling(jit.ScriptModule):
     def __init__(self):
         super(Swaddling, self).__init__()
+        self.pow = math.sqrt(2)
 
     @jit.script_method
     def Omega(self, x):
@@ -123,7 +127,7 @@ class Swaddling(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x, k):
-        return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k**2)).mean()
+        return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k*k)).mean()
 
 
 
@@ -159,7 +163,7 @@ class ActorCritic(jit.ScriptModule):
 
 
         self.action_dim = action_dim
-        q_nodes = h_dim//6
+        q_nodes = h_dim//4
 
         self.a = FeedForward(state_dim, h_dim, 3*action_dim) #3 parts in 1
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
@@ -173,7 +177,7 @@ class ActorCritic(jit.ScriptModule):
 
         self.q_dist = q_nodes*len(self.qnets)
         indexes = torch.arange(0, self.q_dist, 1)/self.q_dist
-        weights = torch.tanh((math.pi*(1-indexes))**math.e) - 0.02*torch.exp(-(indexes/0.02)**2)
+        weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(2*math.pi))
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.e = 1e-3
@@ -218,7 +222,7 @@ class Nets(jit.ScriptModule):
         self.sw = Swaddling()
         self.tau = 0.005
         self.tau_ = 1.0 - self.tau
-        self.alpha = (math.sqrt(5)-1)/2
+        self.alpha = phi_
         self.alpha_= 1.0 - self.alpha
         self.q_next_ema = torch.zeros(1, device=device)
 
@@ -238,7 +242,7 @@ class Nets(jit.ScriptModule):
         q_pred = self.online.critic(state, action)
 
         q_next_ema = self.alpha * self.q_next_ema + self.alpha_ * q_next_target_value
-        net_loss = -self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.rehse(q_pred-q_target) + self.sw(next_scale, next_beta) 
+        net_loss = -self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.rehse((q_pred-q_target)) + self.sw(next_scale, next_beta) 
         self.q_next_ema = q_next_ema.mean()
 
         return net_loss
@@ -275,6 +279,7 @@ class Symphony(object):
 
     def train(self):
 
+
         torch.manual_seed(random.randint(0,2**32-1))
 
         state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample(self.batch_size)
@@ -309,7 +314,7 @@ class ReplayBuffer:
 
         if self.length < self.capacity:
             self.length += 1
-        elif self.not_dones_gamma[self.ptr].item() <= 3e-8:
+        elif self.not_dones_gamma[self.ptr].item() < 3e-8:
             self.not_dones_gamma[self.ptr] += 1e-8
             self.ptr = (self.ptr + 1) % self.capacity
 
@@ -377,7 +382,7 @@ class ReplayBuffer:
         self.ptr = 0
 
         indexes = torch.arange(0, self.length, 1, device=self.device) / self.length
-        weights = torch.tanh((math.pi * indexes) ** math.e) - 0.02 * torch.exp(-((indexes - 1) / 0.02) ** 2)
+        weights = torch.exp(-(torch.abs(indexes-phi/2)/phi_)**(2*math.pi))
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
