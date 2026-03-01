@@ -8,7 +8,6 @@ import numpy as np
 import random
 import pickle
 import os, re
-import time
 
 
 #############################################
@@ -16,17 +15,18 @@ import time
 #############################################
 
 #global parameters
-laptop = True*0.03 # if laptop => 0.01 delay between updates
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-G = 1 # update-to-data ratio
-learning_rate = 1e-4
+G = 3 # update-to-data ratio
+learning_rate = 5e-5
 explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = capacity//1000
 num_episodes = 1000000
+limit_step = 1000 #max steps per episode
+limit_eval = 1000 #max steps per evaluation
 start_episode = 1 #number for the identification of the current episode
 episode_rewards_all, episode_steps_all, test_rewards, Q_learning, total_steps = [], [], [], False, 0
 
@@ -42,9 +42,10 @@ env_valid = gym.make(env_name, render_mode="human")
 
 state_dim = env.observation_space.shape[0]
 action_dim= env.action_space.shape[0]
+state_dim += action_dim
+
 #max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
 max_action = torch.ones(action_dim)
-
 
 algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate)
 
@@ -54,8 +55,7 @@ print("max_action:", max_action)
 print("h_dim", h_dim)
 print("batch_size", algo.nets.online.q_dist)
 
-limit_step = algo.nets.online.q_dist #max steps per episode
-limit_eval = 1000 #max steps per evaluation
+
 
 #############################################
 # -----------Helper Functions---------------#
@@ -175,6 +175,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_step
             
         Return = 0.0     
         state = env.reset()[0]
+        state = np.concatenate([np.zeros(action_dim), state], axis=-1)
         
         for steps in range(1,limit_step+1):
 
@@ -204,11 +205,12 @@ def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_step
             active = steps<(limit_step-50) if Q_learning else True
             action = algo.select_action(state,  action=active, noise=not testing)
             next_state, reward, done, truncated, info = env.step(action)
+            next_state = np.concatenate([action, next_state],  axis=-1)
             if not testing: algo.replay_buffer.add(state, action, reward, next_state, done)
             Return += reward
             
             # actual training
-            if Q_learning: [algo.train() for _ in range(G)]; #time.sleep(laptop)
+            if Q_learning: [algo.train() for _ in range(G)]
             if done or truncated: break
             state = next_state
 
