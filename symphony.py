@@ -183,14 +183,24 @@ class ActorCritic(jit.ScriptModule):
         self.e = 1e-3
         self.e_ = 1-self.e
 
+
     #========= Actor Forward Pass =========
     
     @jit.script_method
-    def actor(self, state, action:bool = True, noise:bool=True):
+    def actor(self, state):
         ASB = torch.tanh(self.a(state)/2).reshape(-1, 3, self.action_dim)
         A, S, B =   ASB [:, 0], ASB[:, 1].abs(), ASB[:, 2].abs()
         N = self.std * torch.randn_like(A).clamp(-math.e, math.e)
-        return self.a_max * torch.tanh(float(action) * S * A + float(noise) * N), S.clamp(self.e, self.e_), B.clamp(self.e, self.e_)
+        return self.a_max * torch.tanh( S * A + N), S.clamp(self.e, self.e_), B.clamp(self.e, self.e_)
+
+    @jit.script_method
+    def actor_play(self, state, action:bool = True, noise:bool=True):
+        ASB = torch.tanh(self.a(state)/2).reshape(-1, 3, self.action_dim)
+        A, S =   ASB [:, 0], ASB[:, 1].abs()
+        N = self.std * torch.randn_like(A).clamp(-math.e, math.e)
+        return self.a_max * torch.tanh(float(action) * S * A + float(noise) * N)
+
+
 
     #========= Critic Forward Pass =========
     # take 3 distributions and concatenate them
@@ -201,11 +211,13 @@ class ActorCritic(jit.ScriptModule):
 
 
 
+
     @jit.script_method
     def critic_soft(self, state, action):
-        q = self.probs * self.critic(state, action).sort(dim=-1)[0]
-        q =  q.sum(dim=-1, keepdim=True)
-        return q, q.detach()
+        q =  self.critic(state, action); q_value = q.detach()
+        q_soft =  (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
+        q_std = q_value.std(dim=-1, keepdim=True)/q_value.mean(dim=-1, keepdim=True).abs()
+        return q_soft, q_soft.detach(), q_std
 
 
 
@@ -234,20 +246,23 @@ class Nets(jit.ScriptModule):
 
 
     @jit.script_method
+    def eta(self, x):
+        return torch.exp(-0.5 * ((x-1)/10)**2)
+
+
+    @jit.script_method
     def loss(self, state, action, reward, next_state, not_done_gamma):
 
         next_action, next_scale, next_beta = self.online.actor(next_state)
-        q_next_target, q_next_target_value = self.target.critic_soft(next_state, next_action)
-        q_target = reward + not_done_gamma * q_next_target_value
+        q_next_target, q_next_target_value, q_std_next_target_value = self.target.critic_soft(next_state, next_action)
+        q_target = self.eta(q_std_next_target_value) * reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
         q_next_ema = self.alpha * self.q_next_ema + self.alpha_ * q_next_target_value
-        net_loss = -self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.rehse((q_pred-q_target)) + self.sw(next_scale, next_beta) 
+        net_loss = -self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.rehse(q_pred-q_target) + self.sw(next_scale, next_beta)
         self.q_next_ema = q_next_ema.mean()
 
         return net_loss
-        
-
 
 
 # Define the algorithm
@@ -267,8 +282,8 @@ class Symphony(object):
     
     def select_action(self, state, action = True, noise=True):
         state = torch.tensor(state, dtype=torch.float32, device=self.device).reshape(-1,self.state_dim)
-        with torch.no_grad(): action = self.nets.online.actor(state, action, noise)[0]
-        return action.cpu().data.numpy().flatten()
+        with torch.no_grad(): action = self.nets.online.actor_play(state, action, noise).detach()
+        return action.flatten().cpu().numpy()
 
     """
     def select_action(self, state,  action = True, noise=True):
