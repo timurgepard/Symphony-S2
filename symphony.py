@@ -214,10 +214,9 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def critic_soft(self, state, action):
-        q =  self.critic(state, action); q_value = q.detach()
+        q =  self.critic(state, action)
         q_soft =  (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
-        q_std = q_value.std(dim=-1, keepdim=True)/q_value.mean(dim=-1, keepdim=True).abs()
-        return q_soft, q_soft.detach(), q_std
+        return q_soft, q_soft.detach()
 
 
 
@@ -245,17 +244,13 @@ class Nets(jit.ScriptModule):
             target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data) 
 
 
-    @jit.script_method
-    def eta(self, x):
-        return torch.exp(-0.5 * ((x-1)/10)**2)
-
 
     @jit.script_method
     def loss(self, state, action, reward, next_state, not_done_gamma):
 
         next_action, next_scale, next_beta = self.online.actor(next_state)
-        q_next_target, q_next_target_value, q_std_next_target_value = self.target.critic_soft(next_state, next_action)
-        q_target = self.eta(q_std_next_target_value) * reward + not_done_gamma * q_next_target_value
+        q_next_target, q_next_target_value = self.target.critic_soft(next_state, next_action)
+        q_target = reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
         q_next_ema = self.alpha * self.q_next_ema + self.alpha_ * q_next_target_value
