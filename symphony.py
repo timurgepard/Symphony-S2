@@ -240,7 +240,7 @@ class Nets(jit.ScriptModule):
     @torch.no_grad()
     def tau_update(self):
         for target_param, param in zip(self.target.qnets.parameters(), self.online.qnets.parameters()):
-            target_param.data.copy_(self.tau_*target_param.data + self.tau*param.data) 
+            target_param.lerp_(param, self.tau)
 
 
 
@@ -395,6 +395,7 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
 
 
 
