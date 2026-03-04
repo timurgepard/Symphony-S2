@@ -247,7 +247,7 @@ class Nets(jit.ScriptModule):
     def loss(self, state, action, reward, next_state, not_done_gamma):
 
         next_action, next_scale, next_beta = self.online.actor(next_state)
-        q_next_target, q_next_target_value = self.target.critic_soft(next_state, next_action)
+        q_next_target_value = self.target.critic_soft(next_state, next_action)
         q_target = reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
@@ -394,4 +394,5 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
 
