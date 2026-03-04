@@ -194,11 +194,11 @@ class ActorCritic(jit.ScriptModule):
         return self.a_max * torch.tanh( S * A + N), S.clamp(self.e, self.e_), B.clamp(self.e, self.e_)
 
     @jit.script_method
-    def actor_play(self, state, action:bool = True, noise:bool=True):
+    def actor_play(self, state, active:bool = True, noise:bool=True):
         ASB = torch.tanh(self.a(state)/2).reshape(-1, 3, self.action_dim)
         A, S =   ASB [:, 0], ASB[:, 1].abs()
         N = self.std * torch.randn_like(A).clamp(-math.e, math.e)
-        return self.a_max * torch.tanh(float(action) * S * A + float(noise) * N)
+        return self.a_max * torch.tanh(float(active) * S * A + float(noise) * N)
 
 
 
@@ -274,9 +274,9 @@ class Symphony(object):
         self.batch_size = self.nets.online.q_dist
 
     
-    def select_action(self, state, action = True, noise=True):
+    def select_action(self, state, active = True, noise=True):
         state = torch.tensor(state, dtype=torch.float32, device=self.device).reshape(-1,self.state_dim)
-        with torch.no_grad(): action = self.nets.online.actor_play(state, action, noise).detach()
+        with torch.no_grad(): action = self.nets.online.actor_play(state, active, noise).detach()
         return action.flatten().cpu().numpy()
 
     """
@@ -395,7 +395,6 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
-
 
 
 
