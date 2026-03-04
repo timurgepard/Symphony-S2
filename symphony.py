@@ -210,13 +210,11 @@ class ActorCritic(jit.ScriptModule):
         return torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
 
 
-
-
     @jit.script_method
     def critic_soft(self, state, action):
-        q =  self.critic(state, action)
-        q_soft =  (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
-        return q_soft, q_soft.detach()
+        with torch.no_grad():
+            q =  self.critic(state, action)
+            return  (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
 
 
 
@@ -396,3 +394,4 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
