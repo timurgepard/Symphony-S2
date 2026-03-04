@@ -212,9 +212,9 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def critic_soft(self, state, action):
-        with torch.no_grad():
             q =  self.critic(state, action)
-            return  (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
+            q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
+            return  q_soft, q_soft.detach()
 
 
 
@@ -225,6 +225,7 @@ class Nets(jit.ScriptModule):
         self.online = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action).to(device)
         self.target = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action).to(device)
         self.target.load_state_dict(self.online.state_dict())
+        for param in self.target.parameters(): param.requires_grad = False
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
@@ -247,7 +248,7 @@ class Nets(jit.ScriptModule):
     def loss(self, state, action, reward, next_state, not_done_gamma):
 
         next_action, next_scale, next_beta = self.online.actor(next_state)
-        q_next_target_value = self.target.critic_soft(next_state, next_action)
+        q_next_target, q_next_target_value = self.target.critic_soft(next_state, next_action)
         q_target = reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
@@ -394,6 +395,7 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
 
 
 
