@@ -1,2 +1,0 @@
-# Paper
-newest updates (Appendix)
