@@ -94,7 +94,7 @@ class ReSine(jit.ScriptModule):
     def forward(self, x):
         s = torch.sigmoid(self.s)
         x = s*torch.sin(x/s)
-        return x/(1+torch.exp(-1.5*x/s))
+        return x * torch.sigmoid(1.5 * x / s)
 
 #GradientDropout
 # nn.Module -> JIT C++ graph
@@ -395,6 +395,7 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
 
 
 
