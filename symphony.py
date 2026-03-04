@@ -252,7 +252,7 @@ class Nets(jit.ScriptModule):
         q_pred = self.online.critic(state, action)
 
         q_next_ema = self.alpha * self.q_next_ema + self.alpha_ * q_next_target_value
-        net_loss = -self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.rehse(q_pred-q_target) + self.sw(next_scale, next_beta)
+        net_loss = -self.rehae((q_next_target_value - q_next_ema)/q_next_ema.abs()) + self.rehse(q_pred-q_target) + self.sw(next_scale, next_beta)
         self.q_next_ema = q_next_ema.mean()
 
         return net_loss
@@ -394,5 +394,6 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
 
 
