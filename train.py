@@ -203,7 +203,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, total_rewards, total_step
 
             # if steps is close to episode limit (e.g. 950) we shut down actions and leave noise to get Terminal Transition:
             active = steps<(limit_step-50) if Q_learning else True
-            action = algo.select_action(state,  action=active, noise=not testing)
+            action = algo.select_action(state,  active=active, noise=not testing)
             next_state, reward, done, truncated, info = env.step(action)
             next_state = np.concatenate([action, next_state],  axis=-1)
             if not testing: algo.replay_buffer.add(state, action, reward, next_state, done)
