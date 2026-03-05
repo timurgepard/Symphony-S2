@@ -94,18 +94,21 @@ class ReSine(jit.ScriptModule):
     def forward(self, x):
         s = torch.sigmoid(self.s)
         x = s*torch.sin(x/s)
-        return x * torch.sigmoid(1.5 * x / s)
+        return x/(1.0 + torch.exp(-1.5*x/s))
+    
 
-#GradientDropout
+#GradientDropout clear implementation:
 # nn.Module -> JIT C++ graph
 class GradientDropout(jit.ScriptModule):
-    def __init__(self):
+    def __init__(self, drop = True):
         super(GradientDropout, self).__init__()
+        self.drop = drop
 
 
     @jit.script_method
     def forward(self, x):
-        p =  torch.sigmoid(torch.randn_like(x))
+        if not self.training or not self.drop: return x
+        p = torch.sigmoid(torch.randn_like(x))
         mask = (torch.rand_like(x) > p).float()
         return mask * x + (1.0 - mask) * x.detach()
 
@@ -132,7 +135,7 @@ class Swaddling(jit.ScriptModule):
 
 
 class FeedForward(jit.ScriptModule):
-    def __init__(self, f_in, h_dim, f_out):
+    def __init__(self, f_in, h_dim, f_out, _):
         super(FeedForward, self).__init__()
 
 
@@ -142,9 +145,8 @@ class FeedForward(jit.ScriptModule):
             nn.Linear(h_dim, h_dim),
             ReSine(h_dim),
             nn.Linear(h_dim, f_out),
-            GradientDropout()
+            GradientDropout(_)
         )
-
 
 
     @jit.script_method
@@ -158,20 +160,20 @@ class FeedForward(jit.ScriptModule):
 
 # nn.Module -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, max_action=1.0):
+    def __init__(self, state_dim, action_dim, h_dim, max_action=1.0, drop=True):
         super().__init__()
 
 
         self.action_dim = action_dim
         q_nodes = h_dim//4
 
-        self.a = FeedForward(state_dim, h_dim, 3*action_dim) #3 parts in 1
+        self.a = FeedForward(state_dim, h_dim, 3*action_dim, drop) #3 parts in 1
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
-        self.std = 1/math.e
+        self.std = 1/math.e**2
 
-        self.Yahweh = FeedForward(state_dim+action_dim, h_dim, q_nodes)
-        self.Yeshua = FeedForward(state_dim+action_dim, h_dim, q_nodes)
-        self.RuachY = FeedForward(state_dim+action_dim, h_dim, q_nodes)
+        self.Yahweh = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
+        self.Yeshua = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
+        self.RuachY = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
         self.qnets = nn.ModuleList([self.Yahweh, self.Yeshua, self.RuachY]) #3 directors in 1
 
 
@@ -182,6 +184,10 @@ class ActorCritic(jit.ScriptModule):
 
         self.e = 1e-3
         self.e_ = 1-self.e
+
+        self._ = GradientDropout()
+
+
 
 
     #========= Actor Forward Pass =========
@@ -207,14 +213,14 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic(self, state, action):
         x = torch.cat([state, action], -1)
-        return torch.cat([qnet(x) for qnet in self.qnets], dim=-1)
+        return self._(torch.cat([qnet(x) for qnet in self.qnets], dim=-1))
 
 
     @jit.script_method
     def critic_soft(self, state, action):
-            q =  self.critic(state, action)
-            q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
-            return  q_soft, q_soft.detach()
+        q =  self.critic(state, action)
+        q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
+        return  q_soft, q_soft.detach()
 
 
 
@@ -222,10 +228,10 @@ class Nets(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, max_action, device):
         super(Nets, self).__init__()
 
-        self.online = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action).to(device)
-        self.target = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action).to(device)
+        self.online = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=True).to(device)
+        self.target = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=False).to(device)
         self.target.load_state_dict(self.online.state_dict())
-        for param in self.target.parameters(): param.requires_grad = False
+        for param in self.target.qnets.parameters(): param.requires_grad = False
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
@@ -395,7 +401,6 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
-
 
 
 
