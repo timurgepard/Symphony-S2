@@ -15,6 +15,26 @@ phi_ = 1/phi
 #==============================================================================================
 #==============================================================================================
 
+class EMAFilter(jit.ScriptModule):
+    def __init__(self, dim, alpha=phi_):
+        super().__init__()
+
+        self.dim = dim
+        self.alpha = alpha
+        self._alpha = 1-alpha
+        self.register_buffer('a', torch.zeros(self.dim))
+
+    @torch.jit.export
+    def reset(self):
+        self.a.zero_()
+
+    @torch.jit.export
+    def forward(self, u):
+        out = self.alpha * self.a + self._alpha * u
+        self.a = out.clone()
+        return out
+    
+
 
 class Adam(optim.Optimizer):
     def __init__(self, params, lr=3e-4, weight_decay=0.01, betas=(phi_, 0.995)):
@@ -25,6 +45,7 @@ class Adam(optim.Optimizer):
         self.beta1, self.beta2 = betas
         self.beta1_, self.beta2_ = 1-self.beta1, 1-self.beta2
         self.eps = 1e-8  # You can make this configurable if needed
+        self.decay_factor = 1.0 - self.lr * self.wd
 
 
     @torch.no_grad()
@@ -51,7 +72,7 @@ class Adam(optim.Optimizer):
                 v.mul_(self.beta2).addcmul_(grad, grad, value=self.beta2_)
 
                 # Update parameters
-                p.add_(m/(v.sqrt() + self.eps) + self.wd*p, alpha=-self.lr)
+                p.mul_(self.decay_factor).addcdiv_(m, v.sqrt().add_(self.eps), value=-self.lr)
                 
 
 
@@ -97,7 +118,6 @@ class ReSine(jit.ScriptModule):
         return x/(1.0 + torch.exp(-1.5*x/s))
     
 
-#clear implementation of
 #GradientDropout:
 # nn.Module -> JIT C++ graph
 class GradientDropout(jit.ScriptModule):
@@ -112,34 +132,7 @@ class GradientDropout(jit.ScriptModule):
         p = torch.sigmoid(torch.randn_like(x))
         mask = (torch.rand_like(x) > p).float()
         return mask * x + (1.0 - mask) * x.detach()
-"""
 
-# Optimized Gradient Dropout:
-class LambdaFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x):
-        ctx.x_shape = x.shape
-        ctx.x_dtype = x.dtype
-        ctx.x_device = x.device
-        return x.view_as(x)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        p = torch.sigmoid(torch.randn(ctx.x_shape, device=ctx.x_device, dtype=ctx.x_dtype))
-        mask = (torch.rand(ctx.x_shape, device=ctx.x_device, dtype=ctx.x_dtype) > p).to(ctx.x_dtype)
-        return grad_output * mask
-
-class GradientDropout(jit.ScriptModule):
-    def __init__(self, drop=True):
-        super(GradientDropout, self).__init__()
-        self.drop = drop
-    
-    @jit.script_method
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if not self.training or not self.drop: return x
-        return LambdaFunction.apply(x)
-#end
-"""
 
 
 class Swaddling(jit.ScriptModule):
@@ -192,12 +185,18 @@ class Actor(jit.ScriptModule):
         self.Adam = FeedForward(state_dim, h_dim, 3*action_dim) #Actor is Adam
         self._ = GradientDropout(drop)
 
+        self.eps = 1e-3
+        self._eps = 1.0-self.eps
+
 
     @jit.script_method
     def forward(self, state):
         x = torch.tanh(self._(self.Adam(state))/2)
         ASB = x.reshape(-1, 3, self.action_dim)
-        return ASB [:, 0], ASB[:, 1].abs(), ASB[:, 2].abs()
+        A = ASB [:, 0]
+        S = ASB[:, 1].abs().clamp(self.eps, self._eps)
+        B = ASB[:, 2].abs().clamp(self.eps, self._eps)
+        return A, S, B 
 
 
 
@@ -232,9 +231,9 @@ class ActorCritic(jit.ScriptModule):
         self.action_dim = action_dim
         q_nodes = h_dim//4
 
-        self.actor = Actor(state_dim, action_dim, h_dim, drop) #3 parts in 1
+        self.actor = Actor(state_dim, action_dim, h_dim, drop)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
-        self.std = 1/math.e**2
+        self.std = 1/math.e
 
         self.critic = Critic(state_dim, action_dim, h_dim, q_nodes, drop)
 
@@ -243,15 +242,12 @@ class ActorCritic(jit.ScriptModule):
         weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(2*math.pi))
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
-        self.e = 1e-3
-        self.e_ = 1-self.e
-
 
     @jit.script_method
     def actor_soft(self, state):
         A, S, B = self.actor(state)  
         N = self.std * torch.randn_like(A).clamp(-math.e, math.e)
-        return self.a_max * torch.tanh( S * A + N), S.clamp(self.e, self.e_), B.clamp(self.e, self.e_)
+        return self.a_max * torch.tanh( S * A + N), S, B
 
     @jit.script_method
     def actor_play(self, state, active:bool = True, noise:bool=True):
@@ -275,7 +271,7 @@ class Nets(jit.ScriptModule):
         self.online = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=True).to(device)
         self.target = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=False).to(device)
         self.target.load_state_dict(self.online.state_dict())
-        for param in self.target.critic.parameters(): param.requires_grad = False
+        for param in self.target.parameters(): param.requires_grad = False
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
@@ -303,10 +299,9 @@ class Nets(jit.ScriptModule):
         q_pred = self.online.critic(state, action)
 
         q_next_ema = self.alpha * self.q_next_ema + self.alpha_ * q_next_target_value
-        net_loss = -self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.rehse(q_pred-q_target) + self.sw(next_scale, next_beta)
         self.q_next_ema = q_next_ema.mean()
-
-        return net_loss
+        eta = self.q_next_ema.clone().abs()
+        return -self.rehae((q_next_target - q_next_ema)/eta) + self.rehse(q_pred-q_target) + self.sw(next_scale, next_beta)
 
 
 # Define the algorithm
@@ -323,11 +318,13 @@ class Symphony(object):
         self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate)
         self.batch_size = self.nets.online.q_dist
 
+        self._ = EMAFilter(action_dim).to(device)
+
     
     def select_action(self, state, active = True, noise=True):
         state = torch.tensor(state, dtype=torch.float32, device=self.device).reshape(-1,self.state_dim)
         with torch.no_grad(): action = self.nets.online.actor_play(state, active, noise).detach()
-        return action.flatten().cpu().numpy()
+        return self._(action.flatten()).cpu().numpy()
 
     """
     def select_action(self, state,  action = True, noise=True):
@@ -346,6 +343,7 @@ class Symphony(object):
         
         self.nets.loss(state, action, reward, next_state, not_done_gamma).backward()
 
+        torch.nn.utils.clip_grad_norm_(self.nets.online.actor.parameters(), max_norm=0.5)
         self.nets_optimizer.step()
         self.nets.tau_update()
 
