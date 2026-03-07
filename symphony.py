@@ -324,7 +324,7 @@ class Symphony(object):
     def select_action(self, state, active = True, noise=True):
         state = torch.tensor(state, dtype=torch.float32, device=self.device).reshape(-1,self.state_dim)
         with torch.no_grad(): action = self.nets.online.actor_play(state, active, noise).detach()
-        return self._(action.flatten()).cpu().numpy()
+        return (action.flatten()).cpu().numpy()
 
     """
     def select_action(self, state,  action = True, noise=True):
@@ -443,6 +443,7 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
+
 
 
 
