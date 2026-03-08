@@ -16,7 +16,7 @@ phi_ = 1/phi
 #==============================================================================================
 
 class EMAFilter(jit.ScriptModule):
-    def __init__(self, dim, alpha=phi_):
+    def __init__(self, dim, alpha=0.8):
         super().__init__()
 
         self.dim = dim
@@ -243,17 +243,12 @@ class ActorCritic(jit.ScriptModule):
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
 
-    @jit.script_method
-    def actor_soft(self, state):
-        A, S, B = self.actor(state)  
-        N = self.std * torch.randn_like(A).clamp(-math.e, math.e)
-        return self.a_max * torch.tanh( S * A + N), S, B
 
     @jit.script_method
-    def actor_play(self, state, active:bool = True, noise:bool=True):
-        A, S, _ = self.actor(state)
+    def actor_soft(self, state, active:float = 1.0, noise:float=1.0):
+        A, S, B = self.actor(state)
         N = self.std * torch.randn_like(A).clamp(-math.e, math.e)
-        return self.a_max * torch.tanh(float(active) * S * A + float(noise) * N)
+        return self.a_max * torch.tanh(active * S * A + noise * N), S, B
 
 
     @jit.script_method
@@ -322,8 +317,9 @@ class Symphony(object):
 
     
     def select_action(self, state, active = True, noise=True):
+        active, noise = float(active), float(noise)
         state = torch.tensor(state, dtype=torch.float32, device=self.device).reshape(-1,self.state_dim)
-        with torch.no_grad(): action = self.nets.online.actor_play(state, active, noise).detach()
+        with torch.no_grad(): action = self.nets.online.actor_soft(state, active, noise)[0].detach()
         return (action.flatten()).cpu().numpy()
 
     """
@@ -443,7 +439,6 @@ class ReplayBuffer:
         self.probs = weights / torch.sum(weights)
 
         print("new replay buffer length: ", self.length)
-
 
 
 
