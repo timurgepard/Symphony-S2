@@ -15,25 +15,36 @@ phi_ = 1/phi
 #==============================================================================================
 #==============================================================================================
 
-class EMAFilter(jit.ScriptModule):
-    def __init__(self, dim, alpha=0.8):
-        super().__init__()
-
-        self.dim = dim
-        self.alpha = alpha
-        self._alpha = 1-alpha
-        self.register_buffer('a', torch.zeros(self.dim))
-
-    @torch.jit.export
-    def reset(self):
-        self.a.zero_()
-
-    @torch.jit.export
-    def forward(self, u):
-        out = self.alpha * self.a + self._alpha * u
-        self.a = out.clone()
-        return out
     
+class RMSProp(optim.Optimizer):
+    def __init__(self, params, lr=3e-4, weight_decay=0.01, beta=0.995):
+        defaults = dict(lr=lr, beta=beta)
+        super().__init__(params, defaults)
+        self.wd = weight_decay
+        self.lr = lr
+        self.beta, self._beta = beta, 1-beta
+        self.eps = 1e-8  # You can make this configurable if needed
+        self.decay_factor = 1.0 - self.lr * self.wd
+
+
+    @torch.no_grad()
+    def step(self):
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+
+                grad = p.grad
+
+                state = self.state[p]
+                if len(state) == 0:
+                    state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                v = state['v']
+
+                v.mul_(self.beta).addcmul_(grad, grad, value=self._beta)
+                # Update parameters
+                p.mul_(self.decay_factor).addcdiv_(grad, v.sqrt().add_(self.eps), value=-self.lr)
 
 
 class Adam(optim.Optimizer):
@@ -229,11 +240,11 @@ class ActorCritic(jit.ScriptModule):
 
 
         self.action_dim = action_dim
-        q_nodes = h_dim//4
+        q_nodes = h_dim//8
 
         self.actor = Actor(state_dim, action_dim, h_dim, drop)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
-        self.std = 1/math.e
+        self.std = 1/2 * 1/math.e
 
         self.critic = Critic(state_dim, action_dim, h_dim, q_nodes, drop)
 
@@ -245,10 +256,10 @@ class ActorCritic(jit.ScriptModule):
 
 
     @jit.script_method
-    def actor_soft(self, state, active:float = 1.0, noise:float=1.0):
+    def actor_soft(self, state):
         A, S, B = self.actor(state)
         N = self.std * torch.randn_like(A).clamp(-math.e, math.e)
-        return self.a_max * torch.tanh(active * S * A + noise * N), S, B
+        return self.a_max * torch.tanh(S * A + N), S, B
 
 
     @jit.script_method
@@ -256,6 +267,13 @@ class ActorCritic(jit.ScriptModule):
         q =  self.critic(state, action)
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
         return  q_soft, q_soft.detach()
+
+
+    @jit.script_method
+    def actor_play(self, state, active:float = 1.0, noise:float=1.0):
+        A, S, _ = self.actor(state)
+        N = self.std * torch.randn_like(A).clamp(-math.e, math.e)
+        return self.a_max * torch.tanh(active * S * A + noise * N)
 
 
 
@@ -276,6 +294,7 @@ class Nets(jit.ScriptModule):
         self.alpha = phi_
         self.alpha_= 1.0 - self.alpha
         self.q_next_ema = torch.zeros(1, device=device)
+        self.n = 0
 
 
     @torch.no_grad()
@@ -294,9 +313,13 @@ class Nets(jit.ScriptModule):
         q_pred = self.online.critic(state, action)
 
         q_next_ema = self.alpha * self.q_next_ema + self.alpha_ * q_next_target_value
+        net_loss = self.rehse(q_pred-q_target); self.n += 1
         self.q_next_ema = q_next_ema.mean()
-        eta = self.q_next_ema.clone().abs()
-        return -self.rehae((q_next_target - q_next_ema)/eta) + self.rehse(q_pred-q_target) + self.sw(next_scale, next_beta)
+
+        if self.n%3==0:
+            eta = self.q_next_ema.clone().abs()
+            net_loss = net_loss - self.rehae((q_next_target - q_next_ema)/eta) + self.sw(next_scale, next_beta)
+        return net_loss
 
 
 # Define the algorithm
@@ -313,15 +336,12 @@ class Symphony(object):
         self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate)
         self.batch_size = self.nets.online.q_dist
 
-        self._ = EMAFilter(action_dim).to(device)
-
     
     def select_action(self, state, active = True, noise=True):
         active, noise = float(active), float(noise)
         state = torch.tensor(state, dtype=torch.float32, device=self.device).reshape(-1,self.state_dim)
-        with torch.no_grad(): action = self.nets.online.actor_soft(state, active, noise)[0].detach()
-        return (action.flatten()).cpu().numpy()
-
+        with torch.no_grad(): action = self.nets.online.actor_play(state, active, noise).detach().flatten()
+        return action.cpu().numpy()
     """
     def select_action(self, state,  action = True, noise=True):
         with torch.no_grad(): return self.nets.online.actor(state, action, noise)[0]
@@ -339,7 +359,7 @@ class Symphony(object):
         
         self.nets.loss(state, action, reward, next_state, not_done_gamma).backward()
 
-        torch.nn.utils.clip_grad_norm_(self.nets.online.actor.parameters(), max_norm=0.5)
+        #torch.nn.utils.clip_grad_norm_(self.nets.online.actor.parameters(), max_norm=0.5)
         self.nets_optimizer.step()
         self.nets.tau_update()
 
@@ -367,7 +387,7 @@ class ReplayBuffer:
 
         if self.length < self.capacity:
             self.length += 1
-        elif self.not_dones_gamma[self.ptr].item() < 3e-8:
+        elif self.not_dones_gamma[self.ptr].item() == 0.0:
             self.not_dones_gamma[self.ptr] += 1e-8
             self.ptr = (self.ptr + 1) % self.capacity
 
