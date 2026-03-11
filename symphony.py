@@ -316,7 +316,7 @@ class Nets(jit.ScriptModule):
         net_loss = self.rehse(q_pred-q_target); self.n += 1
         self.q_next_ema = q_next_ema.mean()
 
-        if self.n%3==0:
+        if self.n%7==0:
             eta = self.q_next_ema.clone().abs()
             net_loss = net_loss - self.rehae((q_next_target - q_next_ema)/eta) + self.sw(next_scale, next_beta)
         return net_loss
@@ -387,7 +387,7 @@ class ReplayBuffer:
 
         if self.length < self.capacity:
             self.length += 1
-        elif self.not_dones_gamma[self.ptr].item() == 0.0:
+        elif self.not_dones_gamma[self.ptr].item() < 3e-8:
             self.not_dones_gamma[self.ptr] += 1e-8
             self.ptr = (self.ptr + 1) % self.capacity
 
