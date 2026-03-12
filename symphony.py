@@ -89,11 +89,11 @@ class Adam(optim.Optimizer):
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
 # nn.Module -> JIT C++ graph
-class ReHSE(jit.ScriptModule):
+class ReHSE(nn.Module):
     def __init__(self):
         super(ReHSE, self).__init__()
 
-    @jit.script_method
+    #@jit.script_method
     def forward(self, e):
         return (e * torch.tanh(e/2)).mean()
 
@@ -101,11 +101,11 @@ class ReHSE(jit.ScriptModule):
 
 #Rectified Huber Asymmetric Error Loss Function via JIT Module
 # nn.Module -> JIT C++ graph
-class ReHAE(jit.ScriptModule):
+class ReHAE(nn.Module):
     def __init__(self):
         super(ReHAE, self).__init__()
 
-    @jit.script_method
+    #@jit.script_method
     def forward(self, e):
         return (torch.abs(e) * torch.tanh(e/2)).mean()
 
@@ -116,13 +116,13 @@ class ReHAE(jit.ScriptModule):
 
 #ReSine Activation Function
 # nn.Module -> JIT C++ graph
-class ReSine(jit.ScriptModule):
+class ReSine(nn.Module):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
         k = 1/math.sqrt(hidden_dim)
         self.s = nn.Parameter(data=2.0*k*torch.rand(hidden_dim)-k, requires_grad=True)
  
-    @jit.script_method
+    #@jit.script_method
     def forward(self, x):
         s = torch.sigmoid(self.s)
         x = s*torch.sin(x/s)
@@ -131,13 +131,13 @@ class ReSine(jit.ScriptModule):
 
 #GradientDropout:
 # nn.Module -> JIT C++ graph
-class GradientDropout(jit.ScriptModule):
+class GradientDropout(nn.Module):
     def __init__(self, drop = True):
         super(GradientDropout, self).__init__()
         self.drop = drop
 
 
-    @jit.script_method
+    #@jit.script_method
     def forward(self, x):
         if not self.training or not self.drop: return x
         mask = (torch.rand_like(x) > 0.5).float()
@@ -145,27 +145,27 @@ class GradientDropout(jit.ScriptModule):
 
 
 
-class Swaddling(jit.ScriptModule):
+class Swaddling(nn.Module):
     def __init__(self):
         super(Swaddling, self).__init__()
         self.pow = math.sqrt(2)
 
-    @jit.script_method
+    #@jit.script_method
     def Omega(self, x):
         return torch.log((1+x)/(1-x))
 
-    @jit.script_method
+    #@jit.script_method
     def omega(self, x):
         return x*torch.log(x)
 
 
-    @jit.script_method
+    #@jit.script_method
     def forward(self, x, k):
         return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k*k)).mean()
 
 
 
-class FeedForward(jit.ScriptModule):
+class FeedForward(nn.Module):
     def __init__(self, f_in, h_dim, f_out, drop):
         super(FeedForward, self).__init__()
 
@@ -180,7 +180,7 @@ class FeedForward(jit.ScriptModule):
         )
 
 
-    @jit.script_method
+    #@jit.script_method
     def forward(self, x):
         return self.ffw(x)
 
@@ -188,7 +188,7 @@ class FeedForward(jit.ScriptModule):
 
 
 # nn.Module -> JIT C++ graph
-class Actor(jit.ScriptModule):
+class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, h_dim, drop=True):
         super().__init__()
 
@@ -199,7 +199,7 @@ class Actor(jit.ScriptModule):
         self._eps = 1.0-self.eps
 
 
-    @jit.script_method
+    #@jit.script_method
     def forward(self, state):
         ASB = torch.tanh(self.Adam(state)/2).reshape(-1, 3, self.action_dim)
         A = ASB [:, 0]
@@ -210,7 +210,7 @@ class Actor(jit.ScriptModule):
 
 
 # nn.Module -> JIT C++ graph
-class Critic(jit.ScriptModule):
+class Critic(nn.Module):
     def __init__(self, state_dim, action_dim, h_dim, q_nodes, drop=True):
         super().__init__()
 
@@ -220,7 +220,7 @@ class Critic(jit.ScriptModule):
         self.God = nn.ModuleList([self.Yahweh, self.Yeshua, self.RuachY]) #Critic is God (Trinity)
 
 
-    @jit.script_method
+    #@jit.script_method
     def forward(self, state, action):
         x = torch.cat([state, action], -1)
         return torch.cat([Lord(x) for Lord in self.God], dim=-1)
@@ -230,7 +230,7 @@ class Critic(jit.ScriptModule):
 
 
 # nn.Module -> JIT C++ graph
-class ActorCritic(jit.ScriptModule):
+class ActorCritic(nn.Module):
     def __init__(self, state_dim, action_dim, h_dim, max_action=1.0, drop=True):
         super().__init__()
 
@@ -252,20 +252,20 @@ class ActorCritic(jit.ScriptModule):
         self.register_buffer('N', torch.zeros(self.q_dist, self.action_dim))
 
 
-    @jit.script_method
+    #@jit.script_method
     def actor_soft(self, state):
         A, S, B = self.actor(state)
         return self.a_max * torch.tanh(S * A + self.N), S, B
 
 
-    @jit.script_method
+    #@jit.script_method
     def critic_soft(self, state, action):
         q =  self.critic(state, action)
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
         return  q_soft, q_soft.detach()
 
 
-    @jit.script_method
+    #@jit.script_method
     def actor_play(self, state, active:float = 1.0, noise:float=1.0):
         A, S, _ = self.actor(state)
         self.N.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
@@ -273,7 +273,7 @@ class ActorCritic(jit.ScriptModule):
 
 
 
-class Nets(jit.ScriptModule):
+class Nets(nn.Module):
     def __init__(self, state_dim, action_dim, h_dim, max_action, device):
         super(Nets, self).__init__()
 
@@ -300,21 +300,24 @@ class Nets(jit.ScriptModule):
 
 
 
-    @jit.script_method
+    #@jit.script_method
     def loss(self, state, action, reward, next_state, not_done_gamma):
 
-        next_action, next_scale, next_beta = self.online.actor_soft(next_state)
-        q_next_target, q_next_target_value = self.target.critic_soft(next_state, next_action)
+        actor_update = (self.n%3==0)
+
+        with torch.set_grad_enabled(actor_update):
+            next_action, next_scale, next_beta = self.online.actor_soft(next_state)
+            q_next_target, q_next_target_value = self.target.critic_soft(next_state, next_action)
+            
         q_target = reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
         q_next_ema = self.alpha * self.q_next_ema + self.alpha_ * q_next_target_value
         net_loss = self.rehse(q_pred-q_target); self.n += 1
         self.q_next_ema = q_next_ema.mean()
+        eta = self.q_next_ema.clone().abs()
 
-        if self.n%3==0:
-            eta = self.q_next_ema.clone().abs()
-            net_loss = net_loss - self.rehae((q_next_target - q_next_ema)/eta) + self.sw(next_scale, next_beta)
+        if actor_update: net_loss = net_loss - self.rehae((q_next_target - q_next_ema)/eta) + self.sw(next_scale, next_beta)          
         return net_loss
 
 
@@ -329,6 +332,7 @@ class Symphony(object):
 
         self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, device)
         self.nets = Nets(state_dim, action_dim, h_dim, max_action, device)
+        self.nets = torch.compile(self.nets)
         self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate)
         self.batch_size = self.nets.online.q_dist
 
