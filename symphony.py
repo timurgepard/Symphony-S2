@@ -330,9 +330,8 @@ class Symphony(object):
         self.device = device
 
 
-        self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, device)
-        self.nets = Nets(state_dim, action_dim, h_dim, max_action, device)
-        self.nets = torch.compile(self.nets)
+        self.replay_buffer = torch.compile(ReplayBuffer(capacity, state_dim, action_dim, device))
+        self.nets = torch.compile(Nets(state_dim, action_dim, h_dim, max_action, device))
         self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate)
         self.batch_size = self.nets.online.q_dist
 
@@ -354,7 +353,7 @@ class Symphony(object):
 
         torch.manual_seed(random.randint(0,2**32-1))
 
-        state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample(self.batch_size)
+        state, action, reward, next_state, not_done_gamma = self.replay_buffer(self.batch_size)
         self.nets_optimizer.zero_grad(set_to_none=True)
         
         self.nets.loss(state, action, reward, next_state, not_done_gamma).backward()
@@ -364,11 +363,12 @@ class Symphony(object):
         self.nets.tau_update()
 
 
-
-
-
-class ReplayBuffer:
+#class ReplayBuffer:
+    #def __init__(self, capacity, state_dim, action_dim, device):
+class ReplayBuffer(nn.Module):
     def __init__(self, capacity, state_dim, action_dim, device):
+        super(ReplayBuffer, self).__init__()
+
 
         self.capacity, self.length, self.device, self.norm, self.ptr = capacity, 0, device, 1.0, 0
         self.action_dim, self.state_dim = action_dim, state_dim
@@ -401,7 +401,7 @@ class ReplayBuffer:
         # advance pointer
         self.ptr = (self.ptr + 1) % self.capacity
 
-    def sample(self, batch_size):
+    def forward(self, batch_size):
 
         indices = torch.multinomial(self.probs, num_samples=batch_size, replacement=True) # fixed indexes
         indices.add_(self.ptr).remainder_(self.capacity)
