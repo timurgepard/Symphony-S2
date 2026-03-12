@@ -34,7 +34,7 @@ env_name = 'Humanoid-v4'
 
 
 pre_valid = False # testing models when loaded
-env = gym.make(env_name, render_mode="human")
+env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
 
@@ -205,7 +205,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
 
             # if steps is close to episode limit (e.g. 900) we shut down actions and leave noise to get Terminal Transition:
-            active = steps<min(average_steps+100, limit_step-100) if Q_learning else True
+            active = steps<min(average_steps+150, limit_step-150) if Q_learning else True
             action = algo.select_action(state,  active=active, noise=not testing)
             next_state, reward, done, truncated, info = env.step(action)
             if not testing: algo.replay_buffer.add(state, action, reward, next_state, done)
@@ -223,7 +223,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
         average_reward = np.mean(episode_return[-300:])
 
 
-        print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| ep steps = {steps} | episode_steps = {total_steps}") 
+        print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| ep steps = {steps} | total_steps = {total_steps}") 
         if not testing and Q_learning: log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + "\n")
         
 
