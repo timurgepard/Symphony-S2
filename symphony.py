@@ -140,8 +140,7 @@ class GradientDropout(jit.ScriptModule):
     @jit.script_method
     def forward(self, x):
         if not self.training or not self.drop: return x
-        p = torch.sigmoid(torch.randn_like(x))
-        mask = (torch.rand_like(x) > p).float()
+        mask = (torch.rand_like(x) > 0.5).float()
         return mask * x + (1.0 - mask) * x.detach()
 
 
@@ -167,7 +166,7 @@ class Swaddling(jit.ScriptModule):
 
 
 class FeedForward(jit.ScriptModule):
-    def __init__(self, f_in, h_dim, f_out):
+    def __init__(self, f_in, h_dim, f_out, drop):
         super(FeedForward, self).__init__()
 
 
@@ -176,7 +175,8 @@ class FeedForward(jit.ScriptModule):
             nn.LayerNorm(h_dim),
             nn.Linear(h_dim, h_dim),
             ReSine(h_dim),
-            nn.Linear(h_dim, f_out)
+            nn.Linear(h_dim, f_out),
+            GradientDropout(drop)
         )
 
 
@@ -193,8 +193,7 @@ class Actor(jit.ScriptModule):
         super().__init__()
 
         self.action_dim = action_dim
-        self.Adam = FeedForward(state_dim, h_dim, 3*action_dim) #Actor is Adam
-        self._ = GradientDropout(drop)
+        self.Adam = FeedForward(state_dim, h_dim, 3*action_dim, drop) #Actor is Adam
 
         self.eps = 1e-3
         self._eps = 1.0-self.eps
@@ -202,8 +201,7 @@ class Actor(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, state):
-        x = torch.tanh(self._(self.Adam(state))/2)
-        ASB = x.reshape(-1, 3, self.action_dim)
+        ASB = torch.tanh(self.Adam(state)/2).reshape(-1, 3, self.action_dim)
         A = ASB [:, 0]
         S = ASB[:, 1].abs().clamp(self.eps, self._eps)
         B = ASB[:, 2].abs().clamp(self.eps, self._eps)
@@ -216,18 +214,16 @@ class Critic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, q_nodes, drop=True):
         super().__init__()
 
-        self.Yahweh = FeedForward(state_dim+action_dim, h_dim, q_nodes)
-        self.Yeshua = FeedForward(state_dim+action_dim, h_dim, q_nodes)
-        self.RuachY = FeedForward(state_dim+action_dim, h_dim, q_nodes)
+        self.Yahweh = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
+        self.Yeshua = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
+        self.RuachY = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
         self.God = nn.ModuleList([self.Yahweh, self.Yeshua, self.RuachY]) #Critic is God (Trinity)
-        self._ = GradientDropout(drop)
 
 
     @jit.script_method
     def forward(self, state, action):
         x = torch.cat([state, action], -1)
-        x = torch.cat([Lord(x) for Lord in self.God], dim=-1)
-        return self._(x)
+        return torch.cat([Lord(x) for Lord in self.God], dim=-1)
 
 
 
@@ -253,13 +249,13 @@ class ActorCritic(jit.ScriptModule):
         weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**8)
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
+        self.register_buffer('N', torch.zeros(self.q_dist, self.action_dim))
 
 
     @jit.script_method
     def actor_soft(self, state):
         A, S, B = self.actor(state)
-        N = self.std * torch.randn_like(A).clamp(-math.e, math.e)
-        return self.a_max * torch.tanh(S * A + N), S, B
+        return self.a_max * torch.tanh(S * A + self.N), S, B
 
 
     @jit.script_method
@@ -272,8 +268,8 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, noise:float=1.0):
         A, S, _ = self.actor(state)
-        N = self.std * torch.randn_like(A).clamp(-math.e, math.e)
-        return self.a_max * torch.tanh(active * S * A + noise * N)
+        self.N.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
+        return self.a_max * torch.tanh(active * S * A + noise * self.N[0,:])
 
 
 
