@@ -240,7 +240,7 @@ class ActorCritic(jit.ScriptModule):
 
 
         self.action_dim = action_dim
-        q_nodes = h_dim//8
+        q_nodes = h_dim//4
 
         self.actor = Actor(state_dim, action_dim, h_dim, drop)
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
