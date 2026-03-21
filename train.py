@@ -123,7 +123,7 @@ def save(algo, episode_return, episode_steps, total_steps):
     print("saving... the buffer length = ", algo.nets.replay_buffer.length.item(), " avg return = ", average_return, " avg steps = ", average_steps, end="")
     torch.save(algo.nets.replay_buffer.state_dict(), 'replay_buffer.pt')
     with open('data', 'wb') as file:
-        pickle.dump({'q_next_ema': algo.nets.q_next_ema, 'episode_return': episode_return, 'episode_steps': episode_steps, 'total_steps' : total_steps}, file)
+        pickle.dump({'episode_return': episode_return, 'episode_steps': episode_steps, 'total_steps' : total_steps}, file)
     print(" > done")
 
 
@@ -144,10 +144,9 @@ def load(algo, Q_learning):
 
     try:
         print("loading buffer...")
-        algo.nets.replay_buffer.load_state_dict(torch.load('replay_buffer.pt'))
+        algo.nets.replay_buffer.load_state_dict(torch.load('replay_buffer.pt', weights_only=True))
         with open('data', 'rb') as file:
             dict = pickle.load(file)
-            algo.nets.q_next_ema = dict['q_next_ema']
             episode_return = dict['episode_return']
             episode_steps = dict['episode_steps']
             total_steps = dict['total_steps']
