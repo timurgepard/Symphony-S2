@@ -19,9 +19,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-G = 3 # update-to-data ratio
 learning_rate = 1e-4
-explore_time, times = 25600, 30
+explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = 512
 num_episodes = 1000000
@@ -196,7 +195,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
             # if total steps is divisible to 2500 save models, stop training and do testing, return to training:
             if Q_learning and total_steps>=2500 and total_steps%2500==0:
-                if total_steps%25000==0: save(algo, episode_return, episode_steps, total_steps)
+                if total_steps%100000==0: save(algo, episode_return, episode_steps, total_steps)
                 
                 print("start testing")
                 test_return = sim_loop(env_test, 25, True, Q_learning, algo, [], [], total_steps=0)
@@ -212,7 +211,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
             Return += reward
             
             # actual training
-            if Q_learning: [algo.update() for _ in range(G)]
+            if Q_learning: algo.update()
             if done or truncated: break
             state = next_state
 
