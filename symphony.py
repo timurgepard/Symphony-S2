@@ -88,39 +88,6 @@ class Adam(optim.Optimizer):
                 
 
 
-class NoisyLinear(jit.ScriptModule):
-    def __init__(self, in_features, out_features, std_init=0.5):
-        super(NoisyLinear, self).__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-
-        # Обучаемые параметры для весов (среднее и дисперсия)
-        self.weight = nn.Parameter(torch.empty(out_features, in_features))
-
-        # Стандартный обучаемый bias (без шума)
-        self.bias = nn.Parameter(torch.zeros(out_features))
-
-        lim = 1 / math.sqrt(in_features)
-        self.weight.data.uniform_(-lim, lim)
-        self.bias.data.uniform_(-lim, lim)
-
-        self.std = 1/math.e * 1/math.e
-
-        self.register_buffer('N', torch.zeros(out_features, in_features))
-
-
-    @jit.script_method
-    def forward(self, x):
-        """Прямой проход с генерацией нового шума на каждый вызов"""
-        if self.training:
-            std = self.std * self.weight.clone().abs().mean()
-            weight = self.weight + std * self.N.normal_(0.0, 1.0).clamp(-math.e, math.e)
-        else:
-            # В режиме оценки используем только средние значения
-            weight = self.weight
-
-        return F.linear(x, weight, self.bias)
-
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
 # jit.ScriptModule -> JIT C++ graph
@@ -200,7 +167,6 @@ class Swaddling(jit.ScriptModule):
 
 
 
-
 class FeedForward(jit.ScriptModule):
     def __init__(self, f_in, h_dim, f_out, drop):
         super(FeedForward, self).__init__()
@@ -219,6 +185,8 @@ class FeedForward(jit.ScriptModule):
     @jit.script_method
     def forward(self, x):
         return self.ffw(x)
+
+
 
 
 # jit.ScriptModule -> JIT C++ graph
@@ -317,15 +285,15 @@ class Nets(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, max_action, capacity, device):
         super(Nets, self).__init__()
 
+        self.init(state_dim, action_dim, h_dim, max_action, device)
+        self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, device)
+
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.h_dim = h_dim
         self.max_action = max_action
         self.device = device
 
-        self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, device)
-
-        self.batch_size = self.nets_init(state_dim, action_dim, h_dim, max_action, device)
 
         self.rehse = ReHSE()
         self.rehae = ReHAE()
@@ -333,20 +301,19 @@ class Nets(jit.ScriptModule):
         self.tau = 0.005
         self.tau_ = 1.0 - self.tau
 
-    def nets_init(self, state_dim, action_dim, h_dim, max_action, device):
+    def init(self, state_dim, action_dim, h_dim, max_action, device):
         self.online = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=True).to(device)
         self.target = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=False).to(device)
         self.target.load_state_dict(self.online.state_dict())
         for param in self.target.parameters(): param.requires_grad = False
 
-        return self.online.q_dist
+        self.batch_size = self.online.q_dist
 
 
     @torch.no_grad()
     def tau_update(self):
         for target_param, param in zip(self.target.critic.parameters(), self.online.critic.parameters()):
             target_param.lerp_(param, self.tau)
-
 
 
 
@@ -429,6 +396,10 @@ class ReplayBuffer(jit.ScriptModule):
         self.next_states.zero_()
         self.not_dones_gamma.zero_()
         self.probs.fill_(1.0)
+
+        self.norm.fill_(1.0)
+        self.ptr.zero_()
+        self.length.zero_()
 
     def add(self, state, action, reward, next_state, done):
     
