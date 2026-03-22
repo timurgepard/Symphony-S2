@@ -19,6 +19,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
+G = 1 # update-to-data ratio
 learning_rate = 1e-4
 explore_time, times = 20480, 25
 capacity = explore_time * times
@@ -32,7 +33,7 @@ episode_rewards, episode_steps, Q_learning, total_steps = [], [], False, 0
 env_name = 'Humanoid-v4'
 
 
-pre_valid = True # testing models when loaded
+pre_valid = False # testing models when loaded
 env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
@@ -119,8 +120,8 @@ def save(algo, episode_return, episode_steps, total_steps):
     torch.save(algo.nets.online.state_dict(), 'nets_online_model.pt')
     torch.save(algo.nets.target.state_dict(), 'nets_target_model.pt')
     torch.save(algo.nets_optimizer.state_dict(), 'nets_optimizer.pt')
+    torch.save(algo.nets.replay_buffer.state_dict(), 'nets_replay_buffer.pt')
     print("saving... the buffer length = ", algo.nets.replay_buffer.length.item(), " avg return = ", average_return, " avg steps = ", average_steps, end="")
-    torch.save(algo.nets.replay_buffer.state_dict(), 'replay_buffer.pt')
     with open('data', 'wb') as file:
         pickle.dump({'episode_return': episode_return, 'episode_steps': episode_steps, 'total_steps' : total_steps}, file)
     print(" > done")
@@ -143,7 +144,7 @@ def load(algo, Q_learning):
 
     try:
         print("loading buffer...")
-        algo.nets.replay_buffer.load_state_dict(torch.load('replay_buffer.pt', weights_only=True))
+        algo.nets.replay_buffer.load_state_dict(torch.load('nets_replay_buffer.pt', weights_only=True))
         with open('data', 'rb') as file:
             dict = pickle.load(file)
             episode_return = dict['episode_return']
@@ -151,7 +152,7 @@ def load(algo, Q_learning):
             total_steps = dict['total_steps']
             if algo.nets.replay_buffer.length>=explore_time and not Q_learning: Q_learning = True
         
-        print('buffer loaded, Q_ema', round(algo.nets.q_next_ema.item(), 2), ', average_reward = ', round(np.mean(episode_return[-300:]), 2))
+        print('buffer loaded, Q_ema', round(algo.nets.target.q_ema.item(), 2), ', average_reward = ', round(np.mean(episode_return[-300:]), 2))
         
     except:
         print("problem during loading buffer")
@@ -195,7 +196,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
             # if total steps is divisible to 2500 save models, stop training and do testing, return to training:
             if Q_learning and total_steps>=2500 and total_steps%2500==0:
-                if total_steps%100000==0: save(algo, episode_return, episode_steps, total_steps)
+                if total_steps%10000==0: save(algo, episode_return, episode_steps, total_steps)
                 
                 print("start testing")
                 test_return = sim_loop(env_test, 25, True, Q_learning, algo, [], [], total_steps=0)
@@ -204,7 +205,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
 
             # if steps is close to episode limit (e.g. 900) we shut down actions and leave noise to get Terminal Transition:
-            active = steps<(limit_step-100) if Q_learning else True
+            active = steps<(limit_step-100) if not testing else True
             action = algo.select_action(state,  active=active, noise=not testing)
             next_state, reward, done, truncated, info = env.step(action)
             if not testing: algo.nets.replay_buffer.add(state, action, reward, next_state, done)
