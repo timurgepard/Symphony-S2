@@ -264,18 +264,18 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def sensor(self, x):
         energy = x.detach().pow(2).mean(dim=0, keepdim=True).sqrt()
-        return x + self.NS[self.idx] * energy
+        return x + self.NS[self.idx[0]] * energy
 
 
     @jit.script_method
     def actor_soft(self, state):
-        A, S, B = self.actor(self.sensor(state))
-        return self.a_max * torch.tanh(S * A + self.NA[self.idx]), S, B
+        A, S, B = self.actor(state)
+        return self.a_max * torch.tanh(S * A + self.NA[self.idx[0]]), S, B
 
 
     @jit.script_method
     def critic_soft(self, state, action):
-        q =  self.critic(self.sensor(state), action)
+        q =  self.critic(state, action)
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
         q_detached = q_soft.detach()
         self.q_ema.mul_(self.alpha).add_(q_detached.mean(), alpha=self._alpha)
@@ -285,8 +285,8 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, noise:float=1.0):
         self.idx.fill_(self.cnt[0] % self.q_dist); self.cnt[0].add_(1)
-        A, S, _ = self.actor(self.sensor(state))
-        return self.a_max * torch.tanh(active * S * A + noise * self.NA[self.idx, 0:1])
+        A, S, _ = self.actor(state)
+        return self.a_max * torch.tanh(active * S * A + noise * self.NA[self.idx[0], 0:1])
 
 
 
@@ -500,7 +500,6 @@ class ReplayBuffer(jit.ScriptModule):
         indexes = torch.arange(0, self.capacity, 1, device=self.device) / self.capacity
         weights = torch.exp(-0.5*(torch.abs(indexes - phi / 2) / phi_) ** 10)
         self.probs.copy_(weights / torch.sum(weights))
-
 
 
 
