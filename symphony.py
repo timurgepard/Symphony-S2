@@ -150,7 +150,6 @@ class GradientDropout(jit.ScriptModule):
 class Swaddling(jit.ScriptModule):
     def __init__(self):
         super(Swaddling, self).__init__()
-        self.pow = math.sqrt(2)
 
     @jit.script_method
     def Omega(self, x):
@@ -164,6 +163,7 @@ class Swaddling(jit.ScriptModule):
     @jit.script_method
     def forward(self, x, k):
         return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k*k)).mean()
+
 
 
 
@@ -188,7 +188,6 @@ class FeedForward(jit.ScriptModule):
 
 
 
-
 # jit.ScriptModule -> JIT C++ graph
 class Actor(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, drop=True):
@@ -199,6 +198,7 @@ class Actor(jit.ScriptModule):
 
         self.eps = 1e-3
         self._eps = 1.0-self.eps
+
 
 
     @jit.script_method
@@ -222,6 +222,7 @@ class Critic(jit.ScriptModule):
         self.God = nn.ModuleList([self.Yahweh, self.Yeshua, self.RuachY]) #Critic is God (Trinity)
 
 
+
     @jit.script_method
     def forward(self, state, action):
         x = torch.cat([state, action], -1)
@@ -236,13 +237,7 @@ class ActorCritic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, max_action=1.0, drop=True):
         super().__init__()
 
-
-        self.action_dim = action_dim
         q_nodes = h_dim//4
-
-        self.actor = Actor(state_dim, action_dim, h_dim, drop)
-        self.a_max = nn.Parameter(data= max_action, requires_grad=False)
-        self.std = 1/math.e
 
         self.critic = Critic(state_dim, action_dim, h_dim, q_nodes, drop)
 
@@ -251,22 +246,36 @@ class ActorCritic(jit.ScriptModule):
         weights = torch.exp(-0.5*(torch.abs(1-phi/2-indexes)/phi_)**10)
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
-        self.register_buffer('N', torch.zeros(self.q_dist, self.action_dim))
-
         self.alpha = phi_
         self._alpha= 1.0 - self.alpha
         self.register_buffer('q_ema', torch.zeros(1))
 
 
+        self.actor = Actor(state_dim, action_dim, h_dim, drop)
+        self.a_max = nn.Parameter(data= max_action, requires_grad=False)
+
+        self.std = 1/math.e
+        self.register_buffer('NA', torch.randn(self.q_dist, self.q_dist, action_dim).clamp_(-math.e, math.e).mul_(self.std))
+        self.register_buffer('NS', torch.randn(self.q_dist, 1, state_dim).clamp_(-math.e, math.e).mul_(0.01))
+        self.register_buffer('cnt', torch.zeros(1, dtype=torch.long))
+        self.register_buffer('idx', torch.zeros(1, dtype=torch.long))
+
+    # we add small noise to the State (energy based) as if it comes from real sensor
+    @jit.script_method
+    def sensor(self, x):
+        energy = x.detach().pow(2).mean(dim=0, keepdim=True).sqrt()
+        return x + self.NS[self.idx] * energy
+
+
     @jit.script_method
     def actor_soft(self, state):
-        A, S, B = self.actor(state)
-        return self.a_max * torch.tanh(S * A + self.N), S, B
+        A, S, B = self.actor(self.sensor(state))
+        return self.a_max * torch.tanh(S * A + self.NA[self.idx]), S, B
 
 
     @jit.script_method
     def critic_soft(self, state, action):
-        q =  self.critic(state, action)
+        q =  self.critic(self.sensor(state), action)
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
         q_detached = q_soft.detach()
         self.q_ema.mul_(self.alpha).add_(q_detached.mean(), alpha=self._alpha)
@@ -275,9 +284,9 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, noise:float=1.0):
-        A, S, _ = self.actor(state)
-        self.N.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
-        return self.a_max * torch.tanh(active * S * A + noise * self.N[0,:])
+        self.idx.fill_(self.cnt[0] % self.q_dist); self.cnt[0].add_(1)
+        A, S, _ = self.actor(self.sensor(state))
+        return self.a_max * torch.tanh(active * S * A + noise * self.NA[self.idx, 0:1])
 
 
 
@@ -300,6 +309,8 @@ class Nets(jit.ScriptModule):
         self.sw = Swaddling()
         self.tau = 0.005
         self.tau_ = 1.0 - self.tau
+  
+
 
     def init(self, state_dim, action_dim, h_dim, max_action, device):
         self.online = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=True).to(device)
@@ -309,6 +320,7 @@ class Nets(jit.ScriptModule):
 
         self.batch_size = self.online.q_dist
 
+        
 
     @torch.no_grad()
     def tau_update(self):
@@ -316,6 +328,9 @@ class Nets(jit.ScriptModule):
             target_param.lerp_(param, self.tau)
 
 
+    @jit.script_method
+    def eta(self, beta):
+        return beta.detach().mean(dim=-1, keepdim=True)
 
     @jit.script_method
     def update(self):
@@ -325,7 +340,7 @@ class Nets(jit.ScriptModule):
         next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
 
-        q_target = reward + not_done_gamma * q_next_target_value
+        q_target = self.eta(next_beta) * reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
         net_loss = self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta) 
@@ -377,16 +392,16 @@ class ReplayBuffer(jit.ScriptModule):
         self.action_dim, self.state_dim = action_dim, state_dim
 
 
-        self.register_buffer("norm", torch.tensor(1, dtype=torch.float32, device=device))
+        self.register_buffer("norm", torch.tensor(1, dtype=torch.float16, device=device))
         self.register_buffer("ptr", torch.tensor(0, dtype=torch.long, device=device))
         self.register_buffer("length", torch.tensor(0, dtype=torch.long, device=device))
 
-        self.register_buffer("states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float32, device=self.device))
-        self.register_buffer("actions", torch.zeros((self.capacity, self.action_dim), dtype=torch.float32, device=self.device))
-        self.register_buffer("rewards", torch.zeros((self.capacity, 1), dtype=torch.float32, device=self.device))
-        self.register_buffer("next_states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float32, device=self.device))
-        self.register_buffer("not_dones_gamma", torch.zeros((self.capacity, 1), dtype=torch.float32, device=self.device))
-        self.register_buffer("probs", torch.ones(self.capacity, dtype=torch.float32, device=self.device))
+        self.register_buffer("states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float16, device=self.device))
+        self.register_buffer("actions", torch.zeros((self.capacity, self.action_dim), dtype=torch.float16, device=self.device))
+        self.register_buffer("rewards", torch.zeros((self.capacity, 1), dtype=torch.float16, device=self.device))
+        self.register_buffer("next_states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float16, device=self.device))
+        self.register_buffer("not_dones_gamma", torch.zeros((self.capacity, 1), dtype=torch.float16, device=self.device))
+        self.register_buffer("probs", torch.ones(self.capacity, dtype=torch.float16, device=self.device))
 
     def init(self):
 
@@ -402,7 +417,8 @@ class ReplayBuffer(jit.ScriptModule):
         self.length.zero_()
 
     def add(self, state, action, reward, next_state, done):
-    
+
+
         if self.length.item() < self.capacity:
             self.length.add_(1)
         # Protect old terminal transitions
@@ -412,11 +428,11 @@ class ReplayBuffer(jit.ScriptModule):
             self.ptr.add_(1).remainder_(self.capacity)
 
         # Direct assignment using the 0-d tensor natively
-        self.states[self.ptr] = torch.as_tensor(state, dtype=torch.float32, device=self.device)
-        self.actions[self.ptr] = torch.as_tensor(action, dtype=torch.float32, device=self.device)
-        self.rewards[self.ptr] = torch.as_tensor([reward / self.norm], dtype=torch.float32, device=self.device)
-        self.next_states[self.ptr] = torch.as_tensor(next_state, dtype=torch.float32, device=self.device)
-        self.not_dones_gamma[self.ptr] = torch.as_tensor([0.99 * (1.0 - float(done))], dtype=torch.float32, device=self.device)
+        self.states[self.ptr] = torch.as_tensor(state, dtype=torch.float16, device=self.device)
+        self.actions[self.ptr] = torch.as_tensor(action, dtype=torch.float16, device=self.device)
+        self.rewards[self.ptr] = torch.as_tensor([reward / self.norm], dtype=torch.float16, device=self.device)
+        self.next_states[self.ptr] = torch.as_tensor(next_state, dtype=torch.float16, device=self.device)
+        self.not_dones_gamma[self.ptr] = torch.as_tensor([0.99 * (1.0 - float(done))], dtype=torch.float16, device=self.device)
 
         # Advance the tensor pointer in-place for the next insertion
         self.ptr.add_(1).remainder_(self.capacity)
@@ -428,11 +444,11 @@ class ReplayBuffer(jit.ScriptModule):
         indices.add_(self.ptr).remainder_(self.capacity)
 
         return (
-            self.states[indices],
-            self.actions[indices],
-            self.rewards[indices],
-            self.next_states[indices],
-            self.not_dones_gamma[indices]
+            self.states[indices].float(),
+            self.actions[indices].float(),
+            self.rewards[indices].float(),
+            self.next_states[indices].float(),
+            self.not_dones_gamma[indices].float()
         )
 
 
@@ -469,9 +485,9 @@ class ReplayBuffer(jit.ScriptModule):
         curr_len = self.length.item()
         
         # 1. Normalize
-        #mean_val = torch.mean(torch.abs(self.rewards[:curr_len]))
-        #self.norm.fill_(mean_val)
-        #self.rewards[:curr_len].div_(self.norm) # In-place division
+        mean_val = torch.mean(torch.abs(self.rewards[:curr_len]))
+        self.norm.fill_(mean_val)
+        self.rewards[:curr_len].div_(self.norm) # In-place division
 
         self._repeat(self.length.item(), times)
         
