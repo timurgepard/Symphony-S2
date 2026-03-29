@@ -19,8 +19,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-G = 1 # update-to-data ratio
-learning_rate = 1e-4
+G = 3
+learning_rate = 5e-5
 explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = 512
@@ -131,6 +131,8 @@ def load(algo, Q_learning):
 
     episode_return, episode_steps, total_steps = [], [], 0
 
+
+
     try:
         print("loading models...")
         algo.nets.online.load_state_dict(torch.load('nets_online_model.pt', weights_only=True))
@@ -212,7 +214,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
             Return += reward
             
             # actual training
-            if Q_learning: algo.update()
+            if Q_learning: [algo.update() for _ in range(G)]
             if done or truncated: break
             state = next_state
 
