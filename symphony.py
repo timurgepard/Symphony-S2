@@ -262,20 +262,20 @@ class ActorCritic(jit.ScriptModule):
 
     # we add small noise to the State (energy based) as if it comes from real sensor
     @jit.script_method
-    def sensor(self, x):
+    def fn(self, x):
         energy = x.detach().pow(2).mean(dim=0, keepdim=True).sqrt()
         return x + self.NS[self.idx[0]] * energy
 
 
     @jit.script_method
     def actor_soft(self, state):
-        A, S, B = self.actor(state)
+        A, S, B = self.actor(self.fn(state))
         return self.a_max * torch.tanh(S * A + self.NA[self.idx[0]]), S, B
 
 
     @jit.script_method
     def critic_soft(self, state, action):
-        q =  self.critic(state, action)
+        q =  self.critic(self.fn(state), action)
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
         q_detached = q_soft.detach()
         self.q_ema.mul_(self.alpha).add_(q_detached.mean(), alpha=self._alpha)
