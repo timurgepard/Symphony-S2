@@ -237,7 +237,7 @@ class ActorCritic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, max_action=1.0, drop=True):
         super().__init__()
 
-        q_nodes = h_dim//4
+        self.q_nodes = q_nodes = h_dim//4
 
         self.critic = Critic(state_dim, action_dim, h_dim, q_nodes, drop)
 
@@ -255,22 +255,20 @@ class ActorCritic(jit.ScriptModule):
         self.a_max = nn.Parameter(data= max_action, requires_grad=False)
 
         self.std = 1/math.e
-        self.register_buffer('NA', torch.randn(self.q_dist, self.q_dist, action_dim).clamp_(-math.e, math.e).mul_(self.std))
-        self.register_buffer('NS', torch.randn(self.q_dist, 1, state_dim).clamp_(-math.e, math.e).mul_(0.01))
-        self.register_buffer('cnt', torch.zeros(1, dtype=torch.long))
-        self.register_buffer('idx', torch.zeros(1, dtype=torch.long))
+        self.register_buffer('NA', torch.empty((self.q_dist, action_dim)))
+        self.register_buffer('NS', torch.empty(self.q_dist, state_dim))
 
     # we add small noise to the State (energy based) as if it comes from real sensor
     @jit.script_method
     def fn(self, x):
         energy = x.detach().pow(2).mean(dim=0, keepdim=True).sqrt()
-        return x + self.NS[self.idx[0]] * energy
+        return x + self.NS * energy
 
 
     @jit.script_method
     def actor_soft(self, state):
         A, S, B = self.actor(self.fn(state))
-        return self.a_max * torch.tanh(S * A + self.NA[self.idx[0]]), S, B
+        return self.a_max * torch.tanh(S * A + self.NA), S, B
 
 
     @jit.script_method
@@ -284,9 +282,10 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, noise:float=1.0):
-        self.idx.fill_(self.cnt[0] % self.q_dist); self.cnt[0].add_(1)
         A, S, _ = self.actor(state)
-        return self.a_max * torch.tanh(active * S * A + noise * self.NA[self.idx[0], 0:1])
+        self.NS.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(0.005)
+        self.NA.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
+        return self.a_max * torch.tanh(active * S * A + noise * self.NA[0:1])
 
 
 
@@ -309,6 +308,7 @@ class Nets(jit.ScriptModule):
         self.sw = Swaddling()
         self.tau = 0.005
         self.tau_ = 1.0 - self.tau
+        self.eta = 0.05
   
 
 
@@ -327,10 +327,8 @@ class Nets(jit.ScriptModule):
         for target_param, param in zip(self.target.critic.parameters(), self.online.critic.parameters()):
             target_param.lerp_(param, self.tau)
 
-
-    @jit.script_method
-    def eta(self, beta):
-        return beta.detach().mean(dim=-1, keepdim=True)
+    
+    
 
     @jit.script_method
     def update(self):
@@ -340,7 +338,7 @@ class Nets(jit.ScriptModule):
         next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
 
-        q_target = self.eta(next_beta) * reward + not_done_gamma * q_next_target_value
+        q_target = self.eta * reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
         net_loss = self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta) 
@@ -374,7 +372,6 @@ class Symphony(object):
     """
 
     def update(self):
-
         self.nets_optimizer.zero_grad(set_to_none=True)
         self.nets.update()
         self.nets_optimizer.step()
