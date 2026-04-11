@@ -238,13 +238,13 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor_soft(self, state):
-        A, S, B = self.actor(self.fn(state))
+        A, S, B = self.actor(state)
         return self.a_max * torch.tanh(S * A + self.NA), S, B
 
 
     @jit.script_method
     def critic_soft(self, state, action):
-        q =  self.critic(self.fn(state), action)
+        q =  self.critic(state, action)
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
         q_detached = q_soft.detach()
         self.q_ema.mul_(self.alpha).add_(q_detached.mean(), alpha=self._alpha)
