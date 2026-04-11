@@ -203,10 +203,10 @@ class Critic(jit.ScriptModule):
 
 # jit.ScriptModule -> JIT C++ graph
 class Transition(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, drop=True):
+    def __init__(self, state_dim, action_dim, h_dim, next_state_dim, drop=True):
         super().__init__()
 
-        self.world = FeedForward(state_dim+action_dim, h_dim, state_dim, drop)
+        self.world = FeedForward(state_dim+action_dim, h_dim, next_state_dim, drop)
 
 
     @jit.script_method
