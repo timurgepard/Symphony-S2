@@ -206,7 +206,7 @@ class Transition(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, q_nodes, drop=True):
         super().__init__()
 
-        self.world = FeedForward(state_dim+action_dim, h_dim, (state_dim, drop)
+        self.world = FeedForward(state_dim+action_dim, h_dim, state_dim, drop)
 
 
     @jit.script_method
@@ -276,7 +276,7 @@ class Nets(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, max_action, capacity, device):
         super(Nets, self).__init__()
 
-        self.transition = FeedForward(state_dim, action_dim)
+        self.world = Transition(state_dim, action_dim, h_dim, state_dim, drop)
 
         self.init(state_dim, action_dim, h_dim, max_action, device)
         self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, device)
