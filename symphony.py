@@ -329,7 +329,7 @@ class Nets(jit.ScriptModule):
         q_target = reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
-        net_loss = self.rehse(next_state, next_state_) + self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta) 
+        net_loss = self.rehse(next_state-next_state_) + self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta) 
         net_loss.backward()
 
 
