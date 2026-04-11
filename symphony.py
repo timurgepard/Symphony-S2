@@ -450,16 +450,14 @@ class ReplayBuffer(jit.ScriptModule):
 
     def norm_fill(self, times: int):
         # Use .item() to get the integer for slicing
-        curr_len = self.length.item()
-        
-        # 1. Normalize
-        mean_val = torch.mean(torch.abs(self.rewards[:curr_len]))
-        self.norm.fill_(mean_val)
-        self.rewards[:curr_len].div_(self.norm) # In-place division
-
+        # 1. Repeat
         self._repeat(self.length.item(), times)
         
-
+        # 2. Normalize
+        mean_val = torch.mean(torch.abs(self.rewards))
+        self.norm.fill_(mean_val)
+        self.rewards.div_(self.norm) # In-place division
+        
         # 3. Reset tracking
         self.length.fill_(self.capacity)
         self.ptr.fill_(0)
