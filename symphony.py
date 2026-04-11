@@ -297,7 +297,7 @@ class Nets(jit.ScriptModule):
 
 
     def init(self, state_dim, action_dim, h_dim, max_action, device):
-        self.world = Transition(state_dim, action_dim, h_dim, drop=True).to(device)
+        self.world = Transition(state_dim, action_dim, h_dim, state_dim, drop=True).to(device)
         self.online = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=True).to(device)
         self.target = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=False).to(device)
         self.target.load_state_dict(self.online.state_dict())
