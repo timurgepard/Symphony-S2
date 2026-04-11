@@ -276,7 +276,7 @@ class Nets(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, max_action, capacity, device):
         super(Nets, self).__init__()
 
-        self.world = Transition(state_dim, action_dim, h_dim, state_dim, drop)
+        
 
         self.init(state_dim, action_dim, h_dim, max_action, device)
         self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, device)
@@ -297,6 +297,7 @@ class Nets(jit.ScriptModule):
 
 
     def init(self, state_dim, action_dim, h_dim, max_action, device):
+        self.world = Transition(state_dim, action_dim, h_dim, state_dim, drop)
         self.online = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=True).to(device)
         self.target = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=False).to(device)
         self.target.load_state_dict(self.online.state_dict())
@@ -321,7 +322,7 @@ class Nets(jit.ScriptModule):
 
         state, action, reward, next_state_, not_done_gamma = self.replay_buffer.sample(self.batch_size)
 
-        next_state = self.transition(state, action)
+        next_state = self.world(state, action)
         next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
 
