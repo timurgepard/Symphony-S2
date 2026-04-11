@@ -17,35 +17,6 @@ phi_ = 1/phi
 #==============================================================================================
 
     
-class RMSProp(optim.Optimizer):
-    def __init__(self, params, lr=3e-4, weight_decay=0.01, beta=0.995):
-        defaults = dict(lr=lr, beta=beta)
-        super().__init__(params, defaults)
-        self.wd = weight_decay
-        self.lr = lr
-        self.beta, self._beta = beta, 1-beta
-        self.eps = 1e-8  # You can make this configurable if needed
-        self.decay_factor = 1.0 - self.lr * self.wd
-
-
-    @torch.no_grad()
-    def step(self):
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-
-                grad = p.grad
-
-                state = self.state[p]
-                if len(state) == 0:
-                    state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                v = state['v']
-
-                v.mul_(self.beta).addcmul_(grad, grad, value=self._beta)
-                # Update parameters
-                p.mul_(self.decay_factor).addcdiv_(grad, v.sqrt().add_(self.eps), value=-self.lr)
 
 
 class Adam(optim.Optimizer):
