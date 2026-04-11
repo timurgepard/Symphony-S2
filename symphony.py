@@ -203,7 +203,7 @@ class Critic(jit.ScriptModule):
 
 # jit.ScriptModule -> JIT C++ graph
 class Transition(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, q_nodes, drop=True):
+    def __init__(self, state_dim, action_dim, h_dim, drop=True):
         super().__init__()
 
         self.world = FeedForward(state_dim+action_dim, h_dim, state_dim, drop)
@@ -297,7 +297,7 @@ class Nets(jit.ScriptModule):
 
 
     def init(self, state_dim, action_dim, h_dim, max_action, device):
-        self.world = Transition(state_dim, action_dim, h_dim, state_dim, drop=True)
+        self.world = Transition(state_dim, action_dim, h_dim, drop=True).to(device)
         self.online = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=True).to(device)
         self.target = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=False).to(device)
         self.target.load_state_dict(self.online.state_dict())
