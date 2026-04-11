@@ -279,8 +279,7 @@ class Nets(jit.ScriptModule):
         self.sw = Swaddling()
         self.tau = 0.005
         self.tau_ = 1.0 - self.tau
-        self.eta = 0.05
-  
+
 
 
     def init(self, state_dim, action_dim, h_dim, max_action, device):
@@ -298,7 +297,9 @@ class Nets(jit.ScriptModule):
         for target_param, param in zip(self.target.critic.parameters(), self.online.critic.parameters()):
             target_param.lerp_(param, self.tau)
 
-    
+    @jit.script_method
+    def eta(self, x):
+        return x.detach().mean(dim=-1, keepdim=True)
     
 
     @jit.script_method
@@ -309,7 +310,7 @@ class Nets(jit.ScriptModule):
         next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
 
-        q_target = self.eta * reward + not_done_gamma * q_next_target_value
+        q_target = self.eta(next_beta) * reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
         net_loss = self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta) 
