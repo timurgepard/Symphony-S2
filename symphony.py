@@ -251,6 +251,7 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor_soft(self, state):
         A, S, B = self.actor(state)
+        self.NA.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
         return self.a_max * torch.tanh(S * A + self.NA), S, B
 
 
@@ -266,9 +267,10 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, noise:float=1.0):
         A, S, _ = self.actor(state)
-        self.NS.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(0.005)
-        self.NA.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
-        return self.a_max * torch.tanh(active * S * A + noise * self.NA[0:1])
+        return self.a_max * torch.tanh(active * S * A)
+        #self.NS.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(0.005)
+        #self.NA.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
+        #return self.a_max * torch.tanh(active * S * A + noise * self.NA[0:1])
 
 
 
