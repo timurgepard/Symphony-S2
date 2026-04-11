@@ -19,7 +19,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-learning_rate = 1e-4
+normalize_reward = True
+learning_rate = 3e-5
 explore_time, times = 20600, 30
 capacity = explore_time * times
 h_dim = 512
@@ -44,7 +45,7 @@ action_dim= env.action_space.shape[0]
 #max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
 max_action = torch.ones(action_dim)
 
-algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate)
+algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate, normalize_reward)
 
 
 print("action_dim: ", action_dim, "state_dim: ", state_dim)
