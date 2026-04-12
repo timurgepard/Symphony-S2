@@ -183,7 +183,6 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
         
         for steps in range(1,limit_step+1):
 
-            seed_reset()
             total_steps += 1
 
             # Activate training if explore time is reached and if it is not testing mode:
@@ -214,7 +213,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
             Return += reward
             
             # actual training
-            if Q_learning: algo.update()
+            if Q_learning: algo.train()
             if done or truncated: break
             state = next_state
 
