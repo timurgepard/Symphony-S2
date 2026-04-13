@@ -356,7 +356,7 @@ class Symphony(object):
 
 
 
-    def train(self, t):
+    def train(self):
         torch.manual_seed(random.randint(0,2**32-1))
         self.update()
 
@@ -493,7 +493,3 @@ class ReplayBuffer(jit.ScriptModule):
         weights = torch.exp(-0.5*(torch.abs(indexes - phi / 2) / phi_) ** 10)
         weights[0], weights[-1] = 0.0, 0.0 # we protect against transition points
         self.probs.copy_(weights / torch.sum(weights))
-
-
-
-
