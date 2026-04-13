@@ -5,7 +5,7 @@ import logging
 logging.getLogger().setLevel(logging.CRITICAL)
 import torch
 import numpy as np
-import random
+import random, math
 import pickle
 import os, re
 
@@ -20,30 +20,31 @@ torch.cuda.empty_cache()
 
 print(device)
 normalize_reward = True
-learning_rate = 3e-5
+learning_rate = 5e-5
 explore_time, times = 20480, 25
 capacity = explore_time * times
-h_dim = 512
+h_dim = 384
 num_episodes = 1000000
-limit_step = 1000 #max steps per episode
+limit_test = 2000
+limit_step = 2000 #max steps per episode
 start_episode = 1 #number for the identification of the current episode
 episode_rewards, episode_steps, Q_learning, total_steps = [], [], False, 0
 
 # environment type.
-env_name = 'Humanoid-v4'
+env_name = 'BipedalWalker-v3'
 
 
 pre_valid = False # testing models when loaded
-env = gym.make(env_name)
-env_test = gym.make(env_name)
-env_valid = gym.make(env_name, render_mode="human")
+env = gym.make(env_name, hardcore=True)
+env_test = gym.make(env_name, hardcore=True)
+env_valid = gym.make(env_name, render_mode="human", hardcore=True)
 
 
 state_dim = env.observation_space.shape[0]
 action_dim= env.action_space.shape[0]
 
 #max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
-max_action = torch.ones(action_dim)
+max_action = math.e*torch.ones(action_dim)
 
 algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate, normalize_reward)
 
@@ -139,7 +140,7 @@ def load(algo, Q_learning):
         algo.nets.target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
         algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt', weights_only=True))
         print('models loaded')
-        if pre_valid: sim_loop(env_valid, 100, True, False, algo, [], [], total_steps==0)
+        if pre_valid: sim_loop(env_valid, 100, True, False, algo, [], [], total_steps==0, limit_steps=limit_test)
     except:
         print("problem during loading models")
 
@@ -169,7 +170,7 @@ def load(algo, Q_learning):
 
 
 # Loop for episodes:[ State -> Loop for one episode: [ Action, Next State, Reward, Done, State = Next State ] ]
-def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_steps, total_steps):
+def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_steps, total_steps, limit_steps):
 
 
     start_episode = len(episode_return) + 1
@@ -180,8 +181,9 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
             
         Return = 0.0     
         state = env.reset()[0]
+
         
-        for steps in range(1,limit_step+1):
+        for steps in range(1,limit_steps+1):
 
             total_steps += 1
 
@@ -196,25 +198,26 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
                     save(algo, episode_return, episode_steps, total_steps)
 
             # if total steps is divisible to 2500 save models, stop training and do testing, return to training:
-            if Q_learning and total_steps>=2500 and total_steps%2500==0:
-                if total_steps%10000==0: save(algo, episode_return, episode_steps, total_steps)
+            if Q_learning and total_steps>=10000 and total_steps%10000==0:
+                save(algo, episode_return, episode_steps, total_steps)
                 
                 print("start testing")
-                test_return = sim_loop(env_test, 25, True, False, algo, [], [], total_steps=0)
+                test_return = sim_loop(env_test, 25, True, False, algo, [], [], total_steps=0, limit_steps=limit_test)
                 log_file.write(str(total_steps) + "," + str(round(test_return, 2)) + "\n")
                 print("end of testing")
 
 
             # if steps is close to episode limit (e.g. 900) we shut down actions and leave noise to get Terminal Transition:
-            active = steps<(limit_step-100) if not testing else True
+            active = steps<(limit_steps-100) if not testing else True
             action = algo.select_action(state,  active=active, noise=not testing)
             next_state, reward, done, truncated, info = env.step(action)
-            if not testing: algo.nets.replay_buffer.add(state, action, reward, next_state, done)
+            reward_ = -5 if reward == -100 else reward
+            if not testing: algo.nets.replay_buffer.add(state, action, reward_, next_state, done)
             Return += reward
             
             # actual training
             if Q_learning: algo.train()
-            if done or truncated: break
+            if done: break
             state = next_state
 
 
@@ -238,4 +241,4 @@ Q_learning, episode_return, episode_steps, total_steps = load(algo, Q_learning)
 if not Q_learning: log_file.clean(); algo.nets.replay_buffer.init()
 
 # Training
-sim_loop(env, num_episodes, False, Q_learning, algo, episode_return, episode_steps, total_steps)
+sim_loop(env, num_episodes, False, Q_learning, algo, episode_return, episode_steps, total_steps, limit_step)
