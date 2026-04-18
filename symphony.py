@@ -123,6 +123,7 @@ class Swaddling(jit.ScriptModule):
     def __init__(self):
         super(Swaddling, self).__init__()
 
+
     @jit.script_method
     def Omega(self, x):
         return torch.log((1+x)/(1-x))
@@ -135,6 +136,17 @@ class Swaddling(jit.ScriptModule):
     @jit.script_method
     def forward(self, x, k):
         return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k*k)).mean()
+
+
+    
+class Reward(jit.ScriptModule):
+    def __init__(self):
+        super(Reward, self).__init__()
+
+
+    @jit.script_method
+    def forward(self, x, k):
+        return x + k.detach().mean(dim=-1, keepdim=True)
 
 
 
@@ -179,7 +191,7 @@ class Actor(jit.ScriptModule):
         A = ASB [:, 0]
         S = ASB[:, 1].abs().clamp(self.eps, self._eps)
         B = ASB[:, 2].abs().clamp(self.eps, self._eps)
-        return A, S, B 
+        return A, S, B
 
 
 
@@ -216,7 +228,7 @@ class ActorCritic(jit.ScriptModule):
         self.q_dist = q_nodes*len(self.critic.God)
         indexes = torch.arange(0, self.q_dist, 1)/self.q_dist
         weights = torch.exp(-0.5*(torch.abs(1-phi/2-indexes)/phi_)**10)
-        weights[0], weights[-1] = 0.0, 0.0 # we remove outliers
+        #weights[0], weights[-1] = 0.0, 0.0 # we remove outliers
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.alpha = phi_
@@ -229,14 +241,6 @@ class ActorCritic(jit.ScriptModule):
 
         self.std = 1/math.e
         self.register_buffer('NA', torch.empty((self.q_dist, action_dim)))
-        self.register_buffer('NS', torch.empty(self.q_dist, state_dim))
-
-    # we add small noise to the State (energy based) as if it comes from real sensor
-    @jit.script_method
-    def fn(self, x):
-        #E = x.detach().pow(2).mean(dim=0, keepdim=True).sqrt()
-        E = x.detach().abs().mean(dim=0, keepdim=True)
-        return x + self.NS * E
 
 
     @jit.script_method
@@ -249,15 +253,15 @@ class ActorCritic(jit.ScriptModule):
     def critic_soft(self, state, action):
         q =  self.critic(state, action)
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
-        q_detached = q_soft.detach()
-        self.q_ema.mul_(self.alpha).add_(q_detached.mean(), alpha=self._alpha)
-        return  q_soft, q_detached, self.q_ema.clone()
+        q_soft_ = q_soft.detach()
+
+        self.q_ema.mul_(self.alpha).add_(q_soft_.mean(), alpha=self._alpha)
+        return  q_soft, q_soft_, self.q_ema.clone()
 
 
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, noise:float=1.0):
-        A, S, _ = self.actor(state)
-        #self.NS.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(0.05)
+        A, S, B = self.actor(state)
         self.NA.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
         return self.a_max * torch.tanh(active * S * A + noise * self.NA[0:1])
 
@@ -280,8 +284,8 @@ class Nets(jit.ScriptModule):
         self.rehse = ReHSE()
         self.rehae = ReHAE()
         self.sw = Swaddling()
+        self.rw = Reward()
         self.tau = 0.005
-        self.tau_ = 1.0 - self.tau
 
 
     def init(self, state_dim, action_dim, h_dim, max_action, device):
@@ -292,17 +296,13 @@ class Nets(jit.ScriptModule):
 
         self.batch_size = self.online.q_dist
 
-        
+
 
     @torch.no_grad()
     def tau_update(self):
         for target_param, param in zip(self.target.critic.parameters(), self.online.critic.parameters()):
             target_param.lerp_(param, self.tau)
 
-    @jit.script_method
-    def eta(self, x):
-        return x.detach().mean(dim=-1, keepdim=True)
-    
 
     @jit.script_method
     def update(self):
@@ -312,7 +312,7 @@ class Nets(jit.ScriptModule):
         next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
 
-        q_target = self.eta(next_beta) * reward + not_done_gamma * q_next_target_value
+        q_target = self.rw(reward, next_beta) + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
         net_loss = self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta) 
@@ -322,8 +322,9 @@ class Nets(jit.ScriptModule):
     @jit.script_method
     def data(self):
         next_state = self.replay_buffer.sample(self.batch_size)[3]
-        with torch.no_grad(): next_action, next_scale, next_beta = self.online.actor(next_state)
-        return next_action.detach().mean(), next_scale.detach().mean(), next_beta.detach().mean()
+        with torch.no_grad(): next_action, next_scale, next_beta = self.online.actor_soft(next_state)
+        with torch.no_grad(): q_next_ema = self.target.critic_soft(next_state, next_action)[2]
+        return next_action.detach().mean(), next_scale.detach().mean(), next_beta.detach().mean(), q_next_ema.mean()
 
 
 
@@ -338,7 +339,6 @@ class Symphony(object):
 
         self.nets = Nets(state_dim, action_dim, h_dim, max_action, capacity, device, reward_norm)
         self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate)
-
 
     
     def select_action(self, state, active = True, noise=True):
@@ -356,10 +356,9 @@ class Symphony(object):
 
 
 
-    def train(self):
+    def train(self, t):
         torch.manual_seed(random.randint(0,2**32-1))
         self.update()
-
 
     def update(self):
         self.nets_optimizer.zero_grad(set_to_none=True)
@@ -368,8 +367,8 @@ class Symphony(object):
         self.nets.tau_update()
 
     def data(self):
-        action, scale, beta = self.nets.data()
-        return action.item(), scale.item(), beta.item()
+        action, scale, beta, q_ema = self.nets.data()
+        return action.item(), scale.item(), beta.item(), q_ema.item()
 
 
 class ReplayBuffer(jit.ScriptModule):
@@ -382,16 +381,16 @@ class ReplayBuffer(jit.ScriptModule):
         self.reward_norm = reward_norm
 
 
-        self.register_buffer("norm", torch.tensor(1, dtype=torch.float32, device=device))
+        self.register_buffer("norm", torch.tensor(1, dtype=torch.float16, device=device))
         self.register_buffer("ptr", torch.tensor(0, dtype=torch.long, device=device))
         self.register_buffer("length", torch.tensor(0, dtype=torch.long, device=device))
 
-        self.register_buffer("states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float32, device=self.device))
-        self.register_buffer("actions", torch.zeros((self.capacity, self.action_dim), dtype=torch.float32, device=self.device))
-        self.register_buffer("rewards", torch.zeros((self.capacity, 1), dtype=torch.float32, device=self.device))
-        self.register_buffer("next_states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float32, device=self.device))
-        self.register_buffer("not_dones_gamma", torch.zeros((self.capacity, 1), dtype=torch.float32, device=self.device))
-        self.register_buffer("probs", torch.ones(self.capacity, dtype=torch.float32, device=self.device))
+        self.register_buffer("states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float16, device=self.device))
+        self.register_buffer("actions", torch.zeros((self.capacity, self.action_dim), dtype=torch.float16, device=self.device))
+        self.register_buffer("rewards", torch.zeros((self.capacity, 1), dtype=torch.float16, device=self.device))
+        self.register_buffer("next_states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float16, device=self.device))
+        self.register_buffer("not_dones_gamma", torch.zeros((self.capacity, 1), dtype=torch.float16, device=self.device))
+        self.register_buffer("probs", torch.ones(self.capacity, dtype=torch.float16, device=self.device))
 
     def init(self):
 
@@ -412,17 +411,17 @@ class ReplayBuffer(jit.ScriptModule):
         if self.length.item() < self.capacity:
             self.length.add_(1)
         # Protect old terminal transitions
-        elif self.not_dones_gamma[self.ptr].item() < 3e-8:
+        elif self.not_dones_gamma[self.ptr].item() == 0.0:
             self.not_dones_gamma[self.ptr] += 1e-8
             # In-place tensor math to advance and skip this slot
             self.ptr.add_(1).remainder_(self.capacity)
 
         # Direct assignment using the 0-d tensor natively
-        self.states[self.ptr] = torch.as_tensor(state, dtype=torch.float32, device=self.device)
-        self.actions[self.ptr] = torch.as_tensor(action, dtype=torch.float32, device=self.device)
-        self.rewards[self.ptr] = torch.as_tensor([reward / self.norm], dtype=torch.float32, device=self.device)
-        self.next_states[self.ptr] = torch.as_tensor(next_state, dtype=torch.float32, device=self.device)
-        self.not_dones_gamma[self.ptr] = torch.as_tensor([0.99 * (1.0 - float(done))], dtype=torch.float32, device=self.device)
+        self.states[self.ptr] = torch.as_tensor(state, dtype=torch.float16, device=self.device)
+        self.actions[self.ptr] = torch.as_tensor(action, dtype=torch.float16, device=self.device)
+        self.rewards[self.ptr] = torch.as_tensor([reward / self.norm], dtype=torch.float16, device=self.device)
+        self.next_states[self.ptr] = torch.as_tensor(next_state, dtype=torch.float16, device=self.device)
+        self.not_dones_gamma[self.ptr] = torch.as_tensor([0.99 * (1.0 - float(done))], dtype=torch.float16, device=self.device)
 
         # Advance the tensor pointer in-place for the next insertion
         self.ptr.add_(1).remainder_(self.capacity)
@@ -434,11 +433,11 @@ class ReplayBuffer(jit.ScriptModule):
         indices.add_(self.ptr).remainder_(self.capacity)
 
         return (
-            self.states[indices],
-            self.actions[indices],
-            self.rewards[indices],
-            self.next_states[indices],
-            self.not_dones_gamma[indices]
+            self.states[indices].float(),
+            self.actions[indices].float(),
+            self.rewards[indices].float(),
+            self.next_states[indices].float(),
+            self.not_dones_gamma[indices].float()
         )
 
 
@@ -491,5 +490,5 @@ class ReplayBuffer(jit.ScriptModule):
         # 4. Probabilities (Pre-calculated for the compiler)
         indexes = torch.arange(0, self.capacity, 1, device=self.device) / self.capacity
         weights = torch.exp(-0.5*(torch.abs(indexes - phi / 2) / phi_) ** 10)
-        weights[0], weights[-1] = 0.0, 0.0 # we protect against transition points
+        #weights[0], weights[-1] = 0.0, 0.0 # we protect against transition points
         self.probs.copy_(weights / torch.sum(weights))
