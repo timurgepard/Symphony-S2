@@ -20,31 +20,31 @@ torch.cuda.empty_cache()
 
 print(device)
 normalize_reward = True
-learning_rate = 5e-5
+learning_rate = 1e-4
 explore_time, times = 20480, 25
 capacity = explore_time * times
-h_dim = 384
+h_dim = 512
 num_episodes = 1000000
-limit_test = 2000
-limit_step = 2000 #max steps per episode
+limit_test = 1000
+limit_step = 1000 #max steps per episode
 start_episode = 1 #number for the identification of the current episode
 episode_rewards, episode_steps, Q_learning, total_steps = [], [], False, 0
 
 # environment type.
-env_name = 'BipedalWalker-v3'
+env_name = 'Humanoid-v4'
 
 
-pre_valid = False # testing models when loaded
-env = gym.make(env_name, hardcore=True)
-env_test = gym.make(env_name, hardcore=True)
-env_valid = gym.make(env_name, render_mode="human", hardcore=True)
+pre_valid = True # testing models when loaded
+env = gym.make(env_name)
+env_test = gym.make(env_name)
+env_valid = gym.make(env_name, render_mode="human")
 
 
 state_dim = env.observation_space.shape[0]
 action_dim= env.action_space.shape[0]
 
 #max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
-max_action = math.e*torch.ones(action_dim)
+max_action = torch.ones(action_dim)
 
 algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate, normalize_reward)
 
@@ -181,7 +181,6 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
             
         Return = 0.0     
         state = env.reset()[0]
-
         
         for steps in range(1,limit_steps+1):
 
@@ -211,25 +210,28 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
             active = steps<(limit_steps-100) if not testing else True
             action = algo.select_action(state,  active=active, noise=not testing)
             next_state, reward, done, truncated, info = env.step(action)
-            reward_ = -5 if reward == -100 else reward
-            if not testing: algo.nets.replay_buffer.add(state, action, reward_, next_state, done)
+
+            if not testing: algo.nets.replay_buffer.add(state, action, reward, next_state, done)
             Return += reward
             
             # actual training
-            if Q_learning: algo.train()
+            if Q_learning: algo.train(total_steps)
             if done: break
             state = next_state
-
-
+        
         episode_steps.append(steps)
         average_steps = np.mean(episode_steps[-300:])
         episode_return.append(Return)
         average_reward = np.mean(episode_return[-300:])
 
 
-        print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| ep steps = {steps} | total_steps = {total_steps}") 
-        if not testing and Q_learning: log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + "\n")
-        
+        if not testing and Q_learning:
+            action, scale, beta, q_ema = algo.data()
+            print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| q_ema = {q_ema:.2f}| scale = {scale:.4f} | beta = {beta:.4f} |  ep steps = {steps} | total_steps = {total_steps}") 
+            log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + "\n")
+        else:
+            print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| ep steps = {steps} | total_steps = {total_steps}") 
+            log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + "\n")
 
     return np.mean(episode_return).item()
 
