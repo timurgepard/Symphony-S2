@@ -34,7 +34,7 @@ episode_rewards, episode_steps, Q_learning, total_steps = [], [], False, 0
 env_name = 'Humanoid-v4'
 
 
-pre_valid = True # testing models when loaded
+pre_valid = False # testing models when loaded
 env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
