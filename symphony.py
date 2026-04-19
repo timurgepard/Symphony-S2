@@ -146,7 +146,7 @@ class Reward(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x, k):
-        return x + k.detach().mean(dim=-1, keepdim=True)
+        return 0.1 * (x + k.detach().mean(dim=-1, keepdim=True))
 
 
 
