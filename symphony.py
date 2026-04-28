@@ -411,7 +411,7 @@ class ReplayBuffer(jit.ScriptModule):
         if self.length.item() < self.capacity:
             self.length.add_(1)
         # Protect old terminal transitions
-        elif self.not_dones_gamma[self.ptr].item() == 0.0:
+        elif self.not_dones_gamma[self.ptr].item() < 3e-8:
             self.not_dones_gamma[self.ptr] += 1e-8
             # In-place tensor math to advance and skip this slot
             self.ptr.add_(1).remainder_(self.capacity)
