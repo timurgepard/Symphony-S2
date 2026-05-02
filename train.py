@@ -231,7 +231,6 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
             log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + "\n")
         else:
             print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| ep steps = {steps} | total_steps = {total_steps}") 
-            log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + "\n")
 
     return np.mean(episode_return).item()
 
