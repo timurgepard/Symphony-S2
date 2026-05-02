@@ -146,7 +146,7 @@ class Reward(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x, k):
-        return 0.1 * (x + k.detach().mean(dim=-1, keepdim=True))
+        return x + k.detach().mean(dim=-1, keepdim=True)
 
 
 
@@ -478,10 +478,8 @@ class ReplayBuffer(jit.ScriptModule):
 
 
         # 2. Normalize
-        if self.reward_norm:
-            mean_val = torch.mean(torch.abs(self.rewards))
-            self.norm.fill_(mean_val)
-            self.rewards.div_(self.norm) # In-place division
+        self.norm.fill_(10.0*torch.mean(torch.abs(self.rewards)))
+        self.rewards.div_(self.norm) # In-place division
 
         # 3. Reset tracking
         self.length.fill_(self.capacity)
