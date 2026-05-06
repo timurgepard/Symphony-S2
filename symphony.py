@@ -60,15 +60,6 @@ class Adam(optim.Optimizer):
 
 
 
-class Reward(jit.ScriptModule):
-    def __init__(self):
-        super(Reward, self).__init__()
-
-
-    @jit.script_method
-    def forward(self, x, k):
-        return (x + k.detach().mean(dim=-1, keepdim=True))/10.0
-
 
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
