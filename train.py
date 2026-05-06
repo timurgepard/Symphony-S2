@@ -34,7 +34,7 @@ episode_rewards, episode_steps, Q_learning, total_steps = [], [], False, 0
 env_name = 'Humanoid-v4'
 
 
-pre_valid = True # testing models when loaded
+pre_valid = False # testing models when loaded
 env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
@@ -226,8 +226,8 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
 
         if not testing and Q_learning:
-            action, scale, beta, q_ema = algo.data()
-            print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| q_ema = {q_ema:.2f}| scale = {scale:.4f} | beta = {beta:.4f} |  ep steps = {steps} | total_steps = {total_steps}") 
+            action, scale, beta, q_ema, q_std = algo.data()
+            print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| q_ema = {q_ema:.2f}| scale = {scale:.4f} | beta = {beta:.4f} | q_std = {q_std:.2f} |  ep steps = {steps} | total_steps = {total_steps}") 
             log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + "\n")
         else:
             print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| ep steps = {steps} | total_steps = {total_steps}") 
