@@ -277,7 +277,6 @@ class Nets(jit.ScriptModule):
         self.rehse = ReHSE()
         self.rehae = ReHAE()
         self.sw = Swaddling()
-        self.rw = Reward()
         self.tau = 0.005
 
 
