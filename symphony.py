@@ -60,6 +60,15 @@ class Adam(optim.Optimizer):
 
 
 
+class Reward(jit.ScriptModule):
+    def __init__(self):
+        super(Reward, self).__init__()
+
+
+    @jit.script_method
+    def forward(self, x, k):
+        return (x + k.detach().mean(dim=-1, keepdim=True))/10.0
+
 
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
@@ -123,6 +132,7 @@ class GradientDropout(jit.ScriptModule):
 class Swaddling(jit.ScriptModule):
     def __init__(self):
         super(Swaddling, self).__init__()
+        self.p = 1/phi_
 
 
     @jit.script_method
@@ -135,8 +145,8 @@ class Swaddling(jit.ScriptModule):
 
 
     @jit.script_method
-    def forward(self, x, k, p):
-        return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k**1/p.detach())).mean()
+    def forward(self, x, k):
+        return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k**self.p)).mean()
 
 
     
@@ -277,6 +287,7 @@ class Nets(jit.ScriptModule):
         self.rehse = ReHSE()
         self.rehae = ReHAE()
         self.sw = Swaddling()
+        self.rw = Reward()
         self.tau = 0.005
 
 
@@ -304,13 +315,10 @@ class Nets(jit.ScriptModule):
         next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
 
-        q_target = reward + not_done_gamma * q_next_target_value
+        q_target = self.rw(reward, next_beta) + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
-        q_next_std = q_next_target_value.std()/q_next_target_value.mean().abs()
-        #print(next_order.item())
-
-        net_loss = self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta, q_next_std) 
+        net_loss = self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta) 
         net_loss.backward()
 
 
@@ -318,9 +326,8 @@ class Nets(jit.ScriptModule):
     def data(self):
         next_state = self.replay_buffer.sample(self.batch_size)[3]
         with torch.no_grad(): next_action, next_scale, next_beta = self.online.actor_soft(next_state)
-        with torch.no_grad(): q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
-        q_next_std = q_next_target_value.std()/q_next_target_value.mean().abs()
-        return next_action.detach().mean(), next_scale.detach().mean(), next_beta.detach().mean(), q_next_ema.mean(), q_next_std.mean()
+        with torch.no_grad(): q_next_ema = self.target.critic_soft(next_state, next_action)[2]
+        return next_action.detach().mean(), next_scale.detach().mean(), next_beta.detach().mean(), q_next_ema.mean()
 
 
 
@@ -363,8 +370,8 @@ class Symphony(object):
         self.nets.tau_update()
 
     def data(self):
-        action, scale, beta, q_ema, q_next_std = self.nets.data()
-        return action.item(), scale.item(), beta.item(), q_ema.item(), q_next_std.item()
+        action, scale, beta, q_ema = self.nets.data()
+        return action.item(), scale.item(), beta.item(), q_ema.item()
 
 
 class ReplayBuffer(jit.ScriptModule):
@@ -474,7 +481,7 @@ class ReplayBuffer(jit.ScriptModule):
 
 
         # 2. Normalize rewards
-        self.norm.fill_(10.0 * torch.mean(torch.abs(self.rewards)))
+        self.norm.fill_(torch.mean(torch.abs(self.rewards)))
         self.rewards.div_(self.norm) # In-place division
 
         # 3. Reset tracking
