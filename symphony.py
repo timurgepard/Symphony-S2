@@ -67,7 +67,7 @@ class Reward(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x, k):
-        return (x + k.detach().mean(dim=-1, keepdim=True))/10.0
+        return (x + k.detach())/10.0
 
 
 
@@ -132,7 +132,7 @@ class GradientDropout(jit.ScriptModule):
 class Swaddling(jit.ScriptModule):
     def __init__(self):
         super(Swaddling, self).__init__()
-        self.p = 1/phi_
+        #self.p = 1/phi_
 
 
     @jit.script_method
@@ -146,7 +146,7 @@ class Swaddling(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x, k):
-        return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k**self.p)).mean()
+        return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k**2)).mean()
 
 
     
@@ -193,8 +193,8 @@ class Actor(jit.ScriptModule):
     def forward(self, state):
         ASB = torch.tanh(self.Adam(state)/2).reshape(-1, 3, self.action_dim)
         A = ASB [:, 0]
-        S = ASB[:, 1].abs().clamp(self.eps, self._eps)
-        B = ASB[:, 2].abs().clamp(self.eps, self._eps)
+        S = ASB[:, 1].abs().mean(dim=-1, keepdim=True)#.clamp(self.eps, self._eps)
+        B = ASB[:, 2].abs().mean(dim=-1, keepdim=True)#.clamp(self.eps, self._eps)
         return A, S, B
 
 
@@ -289,6 +289,7 @@ class Nets(jit.ScriptModule):
         self.sw = Swaddling()
         self.rw = Reward()
         self.tau = 0.005
+        self.eta = 0.1
 
 
     def init(self, state_dim, action_dim, h_dim, max_action, device):
@@ -315,7 +316,7 @@ class Nets(jit.ScriptModule):
         next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
 
-        q_target = self.rw(reward, next_beta) + not_done_gamma * q_next_target_value
+        q_target = self.eta * (reward + next_beta) + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
         net_loss = self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta) 
