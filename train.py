@@ -226,8 +226,8 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
 
         if not testing and Q_learning:
-            action, scale, beta, q_ema, q_std = algo.data()
-            print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| q_ema = {q_ema:.2f}| scale = {scale:.4f} | beta = {beta:.4f} | q_std = {q_std:.2f} |  ep steps = {steps} | total_steps = {total_steps}") 
+            action, scale, beta, q_ema = algo.data()
+            print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| q_ema = {q_ema:.2f}| scale = {scale:.4f} | beta = {beta:.4f} |  ep steps = {steps} | total_steps = {total_steps}") 
             log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + "\n")
         else:
             print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| ep steps = {steps} | total_steps = {total_steps}") 
