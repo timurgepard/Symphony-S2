@@ -193,8 +193,8 @@ class Actor(jit.ScriptModule):
     def forward(self, state):
         ASB = torch.tanh(self.Adam(state)/2).reshape(-1, 3, self.action_dim)
         A = ASB [:, 0]
-        S = ASB[:, 1].abs().mean(dim=-1, keepdim=True)#.clamp(self.eps, self._eps)
-        B = ASB[:, 2].abs().mean(dim=-1, keepdim=True)#.clamp(self.eps, self._eps)
+        S = ASB[:, 1].abs().clamp(self.eps, self._eps)
+        B = ASB[:, 2].abs().clamp(self.eps, self._eps)
         return A, S, B
 
 
