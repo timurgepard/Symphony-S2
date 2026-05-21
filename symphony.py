@@ -350,11 +350,7 @@ class Symphony(object):
         return action.cpu().numpy()
 
 
-    """
-    def select_action(self, state, active = True, noise=True):
-        active, noise = float(active), float(noise)
-        with torch.no_grad(): return self.nets.online.actor_play(state, active, noise)[0]
-    """
+
 
 
 
