@@ -25,8 +25,8 @@ explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = 512
 num_episodes = 1000000
-limit_test = 2000
-limit_step = 2000 #max steps per episode
+limit_test = 1000
+limit_step = 1000 #max steps per episode
 start_episode = 1 #number for the identification of the current episode
 episode_rewards, episode_steps, Q_learning, total_steps = [], [], False, 0
 
