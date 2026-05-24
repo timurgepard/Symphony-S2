@@ -5,6 +5,7 @@ import math
 import torch.jit as jit
 import torch.nn.functional as F
 import random
+import numpy as np
 
 # global constants:
 phi = (math.sqrt(5)+1)/2
@@ -21,7 +22,7 @@ phi_ = 1/phi
 
 
 class Adam(optim.Optimizer):
-    def __init__(self, params, lr=3e-4, weight_decay=0.01, betas=(phi_, 0.995)):
+    def __init__(self, params, lr=3e-4, weight_decay=0.01, betas=(phi_, 0.999)):
         defaults = dict(lr=lr, betas=betas)
         super().__init__(params, defaults)
         self.wd = weight_decay
@@ -58,6 +59,19 @@ class Adam(optim.Optimizer):
                 # Update parameters
                 p.mul_(self.decay_factor).addcdiv_(m, v.sqrt().add_(self.eps), value=-self.lr)
                 
+
+
+class DistReg(jit.ScriptModule):
+    def __init__(self):
+        super(DistReg, self).__init__()
+        self.e = 1e-3
+        self._e = 1-1e-3
+
+    @jit.script_method
+    def forward(self, x):
+        std = x.std(dim=-1, keepdim=True)/(x.detach().abs().mean(dim=-1, keepdim=True) + 1e-6)
+        std = std.clamp(self.e, self._e)
+        return (std*torch.log(std)).mean()
 
 
 
@@ -271,7 +285,8 @@ class Nets(jit.ScriptModule):
         self.rehse = ReHSE()
         self.rehae = ReHAE()
         self.sw = Swaddling()
-        self.tau = 0.005
+        self.dr = DistReg()
+        self.tau = 0.001
         self.eta = torch.tensor(0.1, dtype=torch.float32, device=device)
 
 
@@ -300,13 +315,17 @@ class Nets(jit.ScriptModule):
         next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
 
-        reward += self.eta * next_beta.clone().mean(dim=-1, keepdim=True)
-
-        q_target = self.eta * reward + not_done_gamma * q_next_target_value
+        #reward +=  next_beta.detach().pow(2).sum(dim=-1, keepdim=True)
+       
+        q_target = reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
         net_loss = self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta) 
+        net_loss = net_loss + self.dr(q_pred)
         net_loss.backward()
+
+        #print((q_pred.detach()-q_target).mean().item())
+
 
 
     @jit.script_method
@@ -372,16 +391,16 @@ class ReplayBuffer(jit.ScriptModule):
         self.action_dim, self.state_dim = action_dim, state_dim
 
 
-        self.register_buffer("norm", torch.tensor(1, dtype=torch.float32, device=device))
+        self.register_buffer("norm", torch.tensor(1, dtype=torch.float16, device=device))
         self.register_buffer("ptr", torch.tensor(0, dtype=torch.long, device=device))
         self.register_buffer("length", torch.tensor(0, dtype=torch.long, device=device))
 
-        self.register_buffer("states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float32, device=self.device))
-        self.register_buffer("actions", torch.zeros((self.capacity, self.action_dim), dtype=torch.float32, device=self.device))
-        self.register_buffer("rewards", torch.zeros((self.capacity, 1), dtype=torch.float32, device=self.device))
-        self.register_buffer("next_states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float32, device=self.device))
-        self.register_buffer("not_dones_gamma", torch.zeros((self.capacity, 1), dtype=torch.float32, device=self.device))
-        self.register_buffer("probs", torch.ones(self.capacity, dtype=torch.float32, device=self.device))
+        self.register_buffer("states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float16, device=self.device))
+        self.register_buffer("actions", torch.zeros((self.capacity, self.action_dim), dtype=torch.float16, device=self.device))
+        self.register_buffer("rewards", torch.zeros((self.capacity, 1), dtype=torch.float16, device=self.device))
+        self.register_buffer("next_states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float16, device=self.device))
+        self.register_buffer("not_dones_gamma", torch.zeros((self.capacity, 1), dtype=torch.float16, device=self.device))
+        self.register_buffer("probs", torch.ones(self.capacity, dtype=torch.float16, device=self.device))
 
     def init(self):
 
@@ -398,6 +417,7 @@ class ReplayBuffer(jit.ScriptModule):
 
     def add(self, state, action, reward, next_state, done):
 
+        reward += 0.1 * np.sum(action**2)
 
         if self.length.item() < self.capacity:
             self.length.add_(1)
@@ -408,11 +428,11 @@ class ReplayBuffer(jit.ScriptModule):
             self.ptr.add_(1).remainder_(self.capacity)
 
         # Direct assignment using the 0-d tensor natively
-        self.states[self.ptr] = torch.as_tensor(state, dtype=torch.float32, device=self.device)
-        self.actions[self.ptr] = torch.as_tensor(action, dtype=torch.float32, device=self.device)
-        self.rewards[self.ptr] = torch.as_tensor([reward / self.norm], dtype=torch.float32, device=self.device)
-        self.next_states[self.ptr] = torch.as_tensor(next_state, dtype=torch.float32, device=self.device)
-        self.not_dones_gamma[self.ptr] = torch.as_tensor([0.99 * (1.0 - float(done))], dtype=torch.float32, device=self.device)
+        self.states[self.ptr] = torch.as_tensor(state, dtype=torch.float16, device=self.device)
+        self.actions[self.ptr] = torch.as_tensor(action, dtype=torch.float16, device=self.device)
+        self.rewards[self.ptr] = torch.as_tensor([reward / self.norm], dtype=torch.float16, device=self.device)
+        self.next_states[self.ptr] = torch.as_tensor(next_state, dtype=torch.float16, device=self.device)
+        self.not_dones_gamma[self.ptr] = torch.as_tensor([0.99 * (1.0 - float(done))], dtype=torch.float16, device=self.device)
 
         # Advance the tensor pointer in-place for the next insertion
         self.ptr.add_(1).remainder_(self.capacity)
@@ -424,11 +444,11 @@ class ReplayBuffer(jit.ScriptModule):
         indices.add_(self.ptr).remainder_(self.capacity)
 
         return (
-            self.states[indices],
-            self.actions[indices],
-            self.rewards[indices],
-            self.next_states[indices],
-            self.not_dones_gamma[indices]
+            self.states[indices].float(),
+            self.actions[indices].float(),
+            self.rewards[indices].float(),
+            self.next_states[indices].float(),
+            self.not_dones_gamma[indices].float()
         )
 
 
