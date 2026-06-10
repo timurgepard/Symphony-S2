@@ -218,7 +218,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
             Return += reward
             
             # actual training
-            if Q_learning: algo.train(total_steps)
+            if Q_learning: algo.train()
             if done: break
             state = next_state
         
