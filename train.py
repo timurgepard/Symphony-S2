@@ -9,6 +9,9 @@ import random, math
 import pickle
 import os, re
 
+# global constants:
+phi = (math.sqrt(5)+1)/2 #1.618...
+phi_ = 1/phi #0.618...
 
 #############################################
 # ---------------Parametres-----------------#
@@ -19,11 +22,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
-normalize_reward = True
 learning_rate = 1e-4
 explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = 512
+alpha, tau = phi_, 0.001
 num_episodes = 1000000
 limit_test = 1000
 limit_step = 1000 #max steps per episode
@@ -46,7 +49,7 @@ action_dim= env.action_space.shape[0]
 #max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
 max_action = torch.ones(action_dim)
 
-algo = Symphony(capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate, normalize_reward)
+algo = Symphony(capacity, state_dim, action_dim, h_dim, alpha, tau, device, max_action, learning_rate)
 
 
 print("action_dim: ", action_dim, "state_dim: ", state_dim)
