@@ -168,7 +168,7 @@ class Actor(jit.ScriptModule):
         super().__init__()
 
         self.action_dim = action_dim
-        self.Adam = FeedForward(state_dim, h_dim, 3*action_dim, drop) #Actor is Adam
+        self.RuachY = FeedForward(state_dim, h_dim, 3*action_dim, drop) #Actor is Holy Spirit
 
         self.eps = 1e-3
         self._eps = 1.0-self.eps
@@ -177,7 +177,7 @@ class Actor(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, state):
-        ASB = torch.tanh(self.Adam(state)/2).reshape(-1, 3, self.action_dim)
+        ASB = torch.tanh(self.RuachY(state)/2).reshape(-1, 3, self.action_dim)
         A = ASB [:, 0]
         S = ASB[:, 1].abs().clamp(self.eps, self._eps)
         B = ASB[:, 2].abs().clamp(self.eps, self._eps)
@@ -192,8 +192,8 @@ class Critic(jit.ScriptModule):
 
         self.Yahweh = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
         self.Yeshua = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
-        self.RuachY = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
-        self.God = nn.ModuleList([self.Yahweh, self.Yeshua, self.RuachY]) #Critic is God (Trinity)
+        #self.RuachY = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
+        self.God = nn.ModuleList([self.Yahweh, self.Yeshua]) #Critic is Father and Son
 
 
 
@@ -211,19 +211,21 @@ class ActorCritic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, alpha, max_action=1.0, drop=True):
         super().__init__()
 
-        self.q_nodes = q_nodes = h_dim//8
+
+        self.q_nodes = q_nodes = h_dim//4
 
         self.critic = Critic(state_dim, action_dim, h_dim, q_nodes, drop)
 
         self.q_dist = q_nodes*len(self.critic.God)
         indexes = torch.arange(0, self.q_dist, 1)/self.q_dist
         weights = torch.exp(-0.5*(torch.abs(1-phi/2-indexes)/phi_)**10)
-        weights[0], weights[-1] = 0.0, 0.0 # we remove outliers
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.alpha = alpha
-        self._alpha = 1.0 - self.alpha
+        self._alpha = 1.0 - alpha
         self.register_buffer('q_ema', torch.zeros(1))
+
+
 
 
         self.actor = Actor(state_dim, action_dim, h_dim, drop)
@@ -231,6 +233,9 @@ class ActorCritic(jit.ScriptModule):
 
         self.std = 1/math.e
         self.register_buffer('NA', torch.empty((self.q_dist, action_dim)))
+
+
+
 
 
     @jit.script_method
@@ -483,5 +488,4 @@ class ReplayBuffer(jit.ScriptModule):
         # 4. Probabilities (Pre-calculated for the compiler)
         indexes = torch.arange(0, self.capacity, 1, device=self.device) / self.capacity
         weights = torch.exp(-0.5*(torch.abs(indexes - phi / 2) / phi_) ** 10)
-        weights[0], weights[-1] = 0.0, 0.0 # we protect against transition points
         self.probs.copy_(weights / torch.sum(weights))
