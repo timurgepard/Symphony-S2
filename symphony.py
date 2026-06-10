@@ -8,8 +8,8 @@ import random
 import numpy as np
 
 # global constants:
-phi = (math.sqrt(5)+1)/2
-phi_ = 1/phi
+phi = (math.sqrt(5)+1)/2 #1.618...
+phi_ = 1/phi #0.618...
 
 #==============================================================================================
 #==============================================================================================
@@ -22,7 +22,7 @@ phi_ = 1/phi
 
 
 class Adam(optim.Optimizer):
-    def __init__(self, params, lr=3e-4, weight_decay=0.01, betas=(phi_, 0.999)):
+    def __init__(self, params, lr=3e-4, weight_decay=0.01, betas=(0.9, 0.999)):
         defaults = dict(lr=lr, betas=betas)
         super().__init__(params, defaults)
         self.wd = weight_decay
@@ -60,18 +60,6 @@ class Adam(optim.Optimizer):
                 p.mul_(self.decay_factor).addcdiv_(m, v.sqrt().add_(self.eps), value=-self.lr)
                 
 
-
-class DistReg(jit.ScriptModule):
-    def __init__(self):
-        super(DistReg, self).__init__()
-        self.e = 1e-3
-        self._e = 1-1e-3
-
-    @jit.script_method
-    def forward(self, x):
-        std = x.std(dim=-1, keepdim=True)/(x.detach().abs().mean(dim=-1, keepdim=True) + 1e-6)
-        std = std.clamp(self.e, self._e)
-        return (std*torch.log(std)).mean()
 
 
 
@@ -220,10 +208,10 @@ class Critic(jit.ScriptModule):
 
 # jit.ScriptModule -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, max_action=1.0, drop=True):
+    def __init__(self, state_dim, action_dim, h_dim, alpha, max_action=1.0, drop=True):
         super().__init__()
 
-        self.q_nodes = q_nodes = h_dim//4
+        self.q_nodes = q_nodes = h_dim//8
 
         self.critic = Critic(state_dim, action_dim, h_dim, q_nodes, drop)
 
@@ -233,8 +221,8 @@ class ActorCritic(jit.ScriptModule):
         weights[0], weights[-1] = 0.0, 0.0 # we remove outliers
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
-        self.alpha = phi_
-        self._alpha= 1.0 - self.alpha
+        self.alpha = alpha
+        self._alpha = 1.0 - self.alpha
         self.register_buffer('q_ema', torch.zeros(1))
 
 
@@ -269,10 +257,10 @@ class ActorCritic(jit.ScriptModule):
 
 
 class Nets(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, max_action, capacity, device):
+    def __init__(self, state_dim, action_dim, h_dim, alpha, tau, max_action, capacity, device):
         super(Nets, self).__init__()
 
-        self.init(state_dim, action_dim, h_dim, max_action, device)
+        self.init(state_dim, action_dim, h_dim, alpha, max_action, device)
         self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, device)
 
         self.state_dim = state_dim
@@ -285,14 +273,13 @@ class Nets(jit.ScriptModule):
         self.rehse = ReHSE()
         self.rehae = ReHAE()
         self.sw = Swaddling()
-        self.dr = DistReg()
-        self.tau = 0.001
-        self.eta = torch.tensor(0.1, dtype=torch.float32, device=device)
+        self.tau = tau
 
 
-    def init(self, state_dim, action_dim, h_dim, max_action, device):
-        self.online = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=True).to(device)
-        self.target = ActorCritic(state_dim, action_dim, h_dim, max_action=max_action, drop=False).to(device)
+
+    def init(self, state_dim, action_dim, h_dim, alpha, max_action, device):
+        self.online = ActorCritic(state_dim, action_dim, h_dim, alpha, max_action=max_action, drop=True).to(device)
+        self.target = ActorCritic(state_dim, action_dim, h_dim, alpha, max_action=max_action, drop=False).to(device)
         self.target.load_state_dict(self.online.state_dict())
         for param in self.target.parameters(): param.requires_grad = False
 
@@ -315,16 +302,13 @@ class Nets(jit.ScriptModule):
         next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
 
-        #reward +=  next_beta.detach().pow(2).sum(dim=-1, keepdim=True)
-       
         q_target = reward + not_done_gamma * q_next_target_value
         q_pred = self.online.critic(state, action)
 
         net_loss = self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta) 
-        net_loss = net_loss + self.dr(q_pred)
         net_loss.backward()
 
-        #print((q_pred.detach()-q_target).mean().item())
+ 
 
 
 
@@ -339,15 +323,17 @@ class Nets(jit.ScriptModule):
 
 
 class Symphony(object):
-    def __init__(self, capacity, state_dim, action_dim, h_dim, device, max_action, learning_rate=3e-4, reward_norm=True):
+    def __init__(self, capacity, state_dim, action_dim, h_dim, alpha, tau, device, max_action, learning_rate=3e-4):
         super(Symphony, self).__init__()
 
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.device = device
+        beta1, beta2 = alpha, 1-tau
 
-        self.nets = Nets(state_dim, action_dim, h_dim, max_action, capacity, device)
-        self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate)
+
+        self.nets = Nets(state_dim, action_dim, h_dim, alpha, tau, max_action, capacity, device)
+        self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate, betas=(beta1, beta2))
 
 
     
@@ -390,7 +376,6 @@ class ReplayBuffer(jit.ScriptModule):
         self.capacity, self.device = capacity, device
         self.action_dim, self.state_dim = action_dim, state_dim
 
-
         self.register_buffer("norm", torch.tensor(1, dtype=torch.float16, device=device))
         self.register_buffer("ptr", torch.tensor(0, dtype=torch.long, device=device))
         self.register_buffer("length", torch.tensor(0, dtype=torch.long, device=device))
@@ -416,8 +401,6 @@ class ReplayBuffer(jit.ScriptModule):
         self.length.zero_()
 
     def add(self, state, action, reward, next_state, done):
-
-        reward += 0.1 * np.sum(action**2)
 
         if self.length.item() < self.capacity:
             self.length.add_(1)
