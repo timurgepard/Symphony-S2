@@ -29,7 +29,7 @@ class Adam(optim.Optimizer):
         self.lr = lr
         self.beta1, self.beta2 = betas
         self.beta1_, self.beta2_ = 1-self.beta1, 1-self.beta2
-        self.eps = 1e-3
+        self.eps = 1e-8
         self.decay_factor = 1.0 - self.lr * self.wd
 
 
@@ -58,7 +58,7 @@ class Adam(optim.Optimizer):
                 # Update biased second raw moment estimate
                 v.mul_(self.beta2).addcmul_(grad, grad, value=self.beta2_)
 
-                e.mul_(self.beta1).add_(self.eps, alpha=self.beta1_)
+                e.mul_(self.beta2).add_(self.eps, alpha=self.beta2_)
 
                 # Update parameters
                 p.mul_(self.decay_factor).addcdiv_(m, v.sqrt().add_(e), value=-self.lr)
