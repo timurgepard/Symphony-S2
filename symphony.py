@@ -46,7 +46,7 @@ class Adam(optim.Optimizer):
                 if len(state) == 0:
                     state['m'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['e'] = 1.0 - self.eps
+                    state['e'] = torch.tensor(1.0 - self.eps, device=p.device, dtype=p.dtype)
 
 
                 m = state['m']
@@ -58,7 +58,7 @@ class Adam(optim.Optimizer):
                 # Update biased second raw moment estimate
                 v.mul_(self.beta2).addcmul_(grad, grad, value=self.beta2_)
 
-                e = e * self.beta1 + self.eps * self.beta1_
+                e.mul_(self.beta1).add_(self.eps, alpha=self.beta1_)
 
                 # Update parameters
                 p.mul_(self.decay_factor).addcdiv_(m, v.sqrt().add_(e), value=-self.lr)
