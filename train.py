@@ -26,6 +26,7 @@ learning_rate = 1e-4
 explore_time, times = 20480, 25
 capacity = explore_time * times
 h_dim = 512
+batch_size = q_dist = 384
 alpha, tau = phi_, 0.001
 num_episodes = 1000000
 limit_test = 1000
@@ -38,7 +39,7 @@ env_name = 'Humanoid-v4'
 
 
 pre_valid = False # testing models when loaded
-env = gym.make(env_name)
+env = gym.make(env_name, render_mode="human")
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
 
@@ -49,13 +50,14 @@ action_dim= env.action_space.shape[0]
 #max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
 max_action = torch.ones(action_dim)
 
-algo = Symphony(capacity, state_dim, action_dim, h_dim, alpha, tau, device, max_action, learning_rate)
+algo = Symphony(capacity, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, learning_rate, device)
 
 
 print("action_dim: ", action_dim, "state_dim: ", state_dim)
 print("max_action:", max_action)
 print("h_dim", h_dim)
-print("batch_size", algo.nets.online.q_dist)
+print("batch_size", batch_size)
+print("q distribuion", q_dist)
 
 
 
@@ -136,7 +138,6 @@ def load(algo, Q_learning):
     episode_return, episode_steps, total_steps = [], [], 0
 
 
-
     try:
         print("loading models...")
         algo.nets.online.load_state_dict(torch.load('nets_online_model.pt', weights_only=True))
@@ -196,8 +197,10 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
                 if algo.nets.replay_buffer.length>=explore_time and not Q_learning:
                     Q_learning = True
                     algo.nets.replay_buffer.norm_fill(times)
+                    
                     print("started training")
                     save(algo, episode_return, episode_steps, total_steps)
+                    
 
             # if total steps is divisible to 2500 save models, stop training and do testing, return to training:
             if Q_learning and total_steps>=10000 and total_steps%10000==0:
@@ -209,9 +212,9 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
                 print("end of testing")
 
 
-            # if steps is close to episode limit (e.g. 900) we shut down actions and leave noise to get Terminal Transition:
+            # if steps is close to episode limit (e.g. 900) we shut down actions to get Terminal Transition:
             active = steps<(limit_steps-100) if not testing else True
-            action = algo.select_action(state,  active=active, noise=not testing)
+            action = algo.select_action(state,  active=active, noise=(steps==1)) #noise=(not testing)
             next_state, reward, done, truncated, info = env.step(action)
 
             if not testing: algo.nets.replay_buffer.add(state, action, reward, next_state, done)
