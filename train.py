@@ -39,7 +39,7 @@ env_name = 'Humanoid-v4'
 
 
 pre_valid = False # testing models when loaded
-env = gym.make(env_name, render_mode="human")
+env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
 
