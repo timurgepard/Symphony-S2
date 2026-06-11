@@ -29,7 +29,7 @@ class Adam(optim.Optimizer):
         self.lr = lr
         self.beta1, self.beta2 = betas
         self.beta1_, self.beta2_ = 1-self.beta1, 1-self.beta2
-        self.eps = 1e-8  # You can make this configurable if needed
+        self.eps = 1e-3
         self.decay_factor = 1.0 - self.lr * self.wd
 
 
@@ -46,18 +46,22 @@ class Adam(optim.Optimizer):
                 if len(state) == 0:
                     state['m'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state['e'] = 1.0 - self.eps
 
 
                 m = state['m']
                 v = state['v']
+                e = state['e']
 
                 # Update biased first moment estimate
                 m.mul_(self.beta1).add_(grad, alpha=self.beta1_)
                 # Update biased second raw moment estimate
                 v.mul_(self.beta2).addcmul_(grad, grad, value=self.beta2_)
 
+                e = e * self.beta1 + self.eps * self.beta1_
+
                 # Update parameters
-                p.mul_(self.decay_factor).addcdiv_(m, v.sqrt().add_(self.eps), value=-self.lr)
+                p.mul_(self.decay_factor).addcdiv_(m, v.sqrt().add_(e), value=-self.lr)
                 
 
 
@@ -168,7 +172,7 @@ class Actor(jit.ScriptModule):
         super().__init__()
 
         self.action_dim = action_dim
-        self.RuachY = FeedForward(state_dim, h_dim, 3*action_dim, drop) #Actor is Holy Spirit
+        self.Adam = FeedForward(state_dim, h_dim, 3*action_dim, drop) #Actor is Adam
 
         self.eps = 1e-3
         self._eps = 1.0-self.eps
@@ -177,7 +181,7 @@ class Actor(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, state):
-        ASB = torch.tanh(self.RuachY(state)/2).reshape(-1, 3, self.action_dim)
+        ASB = torch.tanh(self.Adam(state)/2).reshape(-1, 3, self.action_dim)
         A = ASB [:, 0]
         S = ASB[:, 1].abs().clamp(self.eps, self._eps)
         B = ASB[:, 2].abs().clamp(self.eps, self._eps)
@@ -187,37 +191,33 @@ class Actor(jit.ScriptModule):
 
 # jit.ScriptModule -> JIT C++ graph
 class Critic(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, q_nodes, drop=True):
+    def __init__(self, state_dim, action_dim, h_dim, q_dist, drop=True):
         super().__init__()
 
-        self.Yahweh = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
-        self.Yeshua = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
-        #self.RuachY = FeedForward(state_dim+action_dim, h_dim, q_nodes, drop)
-        self.God = nn.ModuleList([self.Yahweh, self.Yeshua]) #Critic is Father and Son
-
+        self.God = FeedForward(state_dim+action_dim, h_dim, q_dist, drop)
 
 
     @jit.script_method
     def forward(self, state, action):
-        x = torch.cat([state, action], -1)
-        return torch.cat([Lord(x) for Lord in self.God], dim=-1)
-
-
+        return self.God(torch.cat([state, action], -1))
 
 
 
 # jit.ScriptModule -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, alpha, max_action=1.0, drop=True):
+    def __init__(self, state_dim, action_dim, h_dim, alpha, q_dist, max_action=1.0, drop=True):
         super().__init__()
 
+        self.actor = Actor(state_dim, action_dim, h_dim, drop)
+        self.a_max = nn.Parameter(data= max_action, requires_grad=False)
 
-        self.q_nodes = q_nodes = h_dim//4
+        self.std = 1/math.e
+        self.register_buffer('N', torch.empty((q_dist, action_dim)))
 
-        self.critic = Critic(state_dim, action_dim, h_dim, q_nodes, drop)
 
-        self.q_dist = q_nodes*len(self.critic.God)
-        indexes = torch.arange(0, self.q_dist, 1)/self.q_dist
+        self.critic = Critic(state_dim, action_dim, h_dim, q_dist, drop)
+        
+        indexes = torch.arange(0, q_dist, 1)/q_dist
         weights = torch.exp(-0.5*(torch.abs(1-phi/2-indexes)/phi_)**10)
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
@@ -226,22 +226,10 @@ class ActorCritic(jit.ScriptModule):
         self.register_buffer('q_ema', torch.zeros(1))
 
 
-
-
-        self.actor = Actor(state_dim, action_dim, h_dim, drop)
-        self.a_max = nn.Parameter(data= max_action, requires_grad=False)
-
-        self.std = 1/math.e
-        self.register_buffer('NA', torch.empty((self.q_dist, action_dim)))
-
-
-
-
-
     @jit.script_method
     def actor_soft(self, state):
         A, S, B = self.actor(state)
-        return self.a_max * torch.tanh(S * A + self.NA), S, B
+        return self.a_max * torch.tanh(S * A + self.N), S, B
 
 
     @jit.script_method
@@ -255,18 +243,18 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, noise:float=1.0):
-        A, S, _ = self.actor(state)
-        self.NA.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
-        return self.a_max * torch.tanh(active * S * A + noise * self.NA[0:1])
+        A, S, B = self.actor(state)
+        self.N.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
+        return self.a_max * torch.tanh(active * S * A + noise * self.N[0:1])
 
 
 
 class Nets(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, alpha, tau, max_action, capacity, device):
+    def __init__(self, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, capacity, device):
         super(Nets, self).__init__()
 
-        self.init(state_dim, action_dim, h_dim, alpha, max_action, device)
-        self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, device)
+        self.init(state_dim, action_dim, h_dim, alpha, q_dist, max_action, device)
+        self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, batch_size, device)
 
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -282,14 +270,14 @@ class Nets(jit.ScriptModule):
 
 
 
-    def init(self, state_dim, action_dim, h_dim, alpha, max_action, device):
-        self.online = ActorCritic(state_dim, action_dim, h_dim, alpha, max_action=max_action, drop=True).to(device)
-        self.target = ActorCritic(state_dim, action_dim, h_dim, alpha, max_action=max_action, drop=False).to(device)
+    def init(self, state_dim, action_dim, h_dim, alpha, q_dist, max_action, device):
+
+        self.online = ActorCritic(state_dim, action_dim, h_dim, alpha, q_dist, max_action=max_action, drop=True).to(device)
+        self.target = ActorCritic(state_dim, action_dim, h_dim, alpha, q_dist, max_action=max_action, drop=False).to(device)
         self.target.load_state_dict(self.online.state_dict())
         for param in self.target.parameters(): param.requires_grad = False
 
-        self.batch_size = self.online.q_dist
-
+ 
         
 
     @torch.no_grad()
@@ -302,7 +290,7 @@ class Nets(jit.ScriptModule):
     @jit.script_method
     def update(self):
 
-        state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample(self.batch_size)
+        state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample()
 
         next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
@@ -319,7 +307,7 @@ class Nets(jit.ScriptModule):
 
     @jit.script_method
     def data(self):
-        next_state = self.replay_buffer.sample(self.batch_size)[3]
+        next_state = self.replay_buffer.sample()[3]
         with torch.no_grad(): next_action, next_scale, next_beta = self.online.actor(next_state)
         with torch.no_grad(): q_next_ema = self.target.critic_soft(next_state, next_action)[2]
         return next_action.detach().mean(), next_scale.detach().mean(), next_beta.detach().mean(), q_next_ema.mean()
@@ -328,7 +316,7 @@ class Nets(jit.ScriptModule):
 
 
 class Symphony(object):
-    def __init__(self, capacity, state_dim, action_dim, h_dim, alpha, tau, device, max_action, learning_rate=3e-4):
+    def __init__(self, capacity, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, learning_rate, device):
         super(Symphony, self).__init__()
 
         self.state_dim = state_dim
@@ -337,7 +325,7 @@ class Symphony(object):
         beta1, beta2 = alpha, 1-tau
 
 
-        self.nets = Nets(state_dim, action_dim, h_dim, alpha, tau, max_action, capacity, device)
+        self.nets = Nets(state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, capacity, device)
         self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate, betas=(beta1, beta2))
 
 
@@ -374,11 +362,11 @@ class Symphony(object):
 
 
 class ReplayBuffer(jit.ScriptModule):
-    def __init__(self, capacity, state_dim, action_dim, device):
+    def __init__(self, capacity, state_dim, action_dim, batch_size, device):
         super(ReplayBuffer, self).__init__()
 
 
-        self.capacity, self.device = capacity, device
+        self.capacity, self.batch_size, self.device = capacity, batch_size, device
         self.action_dim, self.state_dim = action_dim, state_dim
 
         self.register_buffer("norm", torch.tensor(1, dtype=torch.float16, device=device))
@@ -426,9 +414,9 @@ class ReplayBuffer(jit.ScriptModule):
         self.ptr.add_(1).remainder_(self.capacity)
 
     @jit.script_method
-    def sample(self, batch_size:int):
+    def sample(self):
 
-        indices = torch.multinomial(self.probs, num_samples=batch_size, replacement=True) # fixed indexes
+        indices = torch.multinomial(self.probs, num_samples=self.batch_size, replacement=True) # fixed indexes
         indices.add_(self.ptr).remainder_(self.capacity)
 
         return (
