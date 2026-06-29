@@ -29,7 +29,7 @@ capacity = explore_time * times
 h_dim = 512
 batch_size = q_dist = 384
 alpha, tau = phi_, 0.001
-num_episodes = 1000000
+num_episodes = 100000
 limit_test = 1000
 limit_step = 1000 #max steps per episode
 start_episode = 1 #number for the identification of the current episode
@@ -185,6 +185,8 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
 
     for episode in range(start_episode, episodes+1):
+
+        if total_steps>=3000000: break
             
         Return = 0.0     
         state = env.reset()[0]
