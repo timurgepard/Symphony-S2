@@ -22,8 +22,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
 
 print(device)
+
 learning_rate = 1e-4
-explore_time, times = 20480, 25
+explore_time, times = 20000, 35
 capacity = explore_time * times
 h_dim = 512
 batch_size = q_dist = 384
@@ -38,12 +39,12 @@ episode_rewards, episode_steps, Q_learning, total_steps = [], [], False, 0
 env_name = 'Humanoid-v4'
 
 
-pre_valid = False # testing models when loaded
+pre_valid = True # testing models when loaded
 env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
 
-
+state_low, state_high = env.observation_space.low, env.observation_space.high
 state_dim = env.observation_space.shape[0]
 action_dim= env.action_space.shape[0]
 
@@ -104,7 +105,7 @@ class LogFile(object):
         with open(self.log_name_main, 'w') as file:
             file.write("step,return\n")
         with open(self.log_name_opt, 'w') as file:
-            file.write("ep,return,steps,scale\n")
+            file.write("ep,return,steps,q_std,q_ema,scale\n")
 
 
 numbers = extract_r1_r2_r3()
@@ -125,6 +126,7 @@ def save(algo, episode_return, episode_steps, total_steps):
 
     torch.save(algo.nets.online.state_dict(), 'nets_online_model.pt')
     torch.save(algo.nets.target.state_dict(), 'nets_target_model.pt')
+    #torch.save(algo.nets.ofe.state_dict(), 'nets_ofe_model.pt')
     torch.save(algo.nets_optimizer.state_dict(), 'nets_optimizer.pt')
     torch.save(algo.nets.replay_buffer.state_dict(), 'nets_replay_buffer.pt')
     print("saving... the buffer length = ", algo.nets.replay_buffer.length.item(), " avg return = ", average_return, " avg steps = ", average_steps, end="")
@@ -142,6 +144,7 @@ def load(algo, Q_learning):
         print("loading models...")
         algo.nets.online.load_state_dict(torch.load('nets_online_model.pt', weights_only=True))
         algo.nets.target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
+        #algo.nets.ofe.load_state_dict(torch.load('nets_ofe_model.pt', weights_only=True))
         algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt', weights_only=True))
         print('models loaded')
         if pre_valid: sim_loop(env_valid, 100, True, False, algo, [], [], total_steps==0, limit_steps=limit_test)
@@ -198,8 +201,9 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
                     Q_learning = True
                     algo.nets.replay_buffer.norm_fill(times)
                     
-                    print("started training")
+                    
                     save(algo, episode_return, episode_steps, total_steps)
+                    print("started training")
                     
 
             # if total steps is divisible to 2500 save models, stop training and do testing, return to training:
@@ -214,7 +218,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
             # if steps is close to episode limit (e.g. 900) we shut down actions to get Terminal Transition:
             active = steps<(limit_steps-100) if not testing else True
-            action = algo.select_action(state,  active=active, noise=(steps==1)) #noise=(not testing)
+            action = algo.select_action(state,  active=active, test=(testing or Q_learning)) #noise=(not testing)
             next_state, reward, done, truncated, info = env.step(action)
 
             if not testing: algo.nets.replay_buffer.add(state, action, reward, next_state, done)
@@ -232,9 +236,9 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
 
         if not testing and Q_learning:
-            action, scale, beta, q_ema = algo.data()
-            print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| q_ema = {q_ema:.2f}| scale = {scale:.4f} | beta = {beta:.4f} |  ep steps = {steps} | total_steps = {total_steps}") 
-            log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(total_steps) + "," + "\n")
+            action, scale, beta, q_ema, q_std = algo.data()
+            print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| q_ema = {q_ema:.2f}| q_std = {q_std:.4f} | scale = {scale:.4f} | beta = {beta:.4f} |  ep steps = {steps} | total_steps = {total_steps}") 
+            log_file.write_opt(str(episode) + "," + str(round(Return, 2)) + "," + str(round(q_std, 4)) + "," + str(round(q_ema, 4)) + "," + str(round(scale, 4)) + "\n")
         else:
             print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| ep steps = {steps} | total_steps = {total_steps}") 
 
