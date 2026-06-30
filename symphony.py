@@ -150,17 +150,6 @@ class Swaddling(jit.ScriptModule):
 
 
 
-# jit.ScriptModule -> JIT C++ graph
-class Reward(jit.ScriptModule):
-    def __init__(self):
-        super(Reward, self).__init__()
-
-
-    @jit.script_method
-    def forward(self, r, a):
-        return r - torch.atanh(a**2).mean(dim=-1, keepdim=True).div_(math.e)
-
-
 
 
 class FourierSeries(jit.ScriptModule):
@@ -356,7 +345,6 @@ class Nets(jit.ScriptModule):
         self.rehse = ReHSE()
         self.rehae = ReHAE()
         self.sw = Swaddling()
-        self.rw = Reward()
         self.tau = tau
 
     
@@ -392,7 +380,7 @@ class Nets(jit.ScriptModule):
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
         
 
-        q_target = self.rw(reward, action) + not_done_gamma * q_next_target_value
+        q_target = reward + not_done_gamma * q_next_target_value - torch.atanh(action**2).mean(dim=-1, keepdim=True).div_(math.e)
         q_pred, r_pred = self.online.critic_direct(state, action)
 
 
