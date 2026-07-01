@@ -67,6 +67,15 @@ class Adam(optim.Optimizer):
                 p.mul_(self.decay_factor).addcdiv_(m, v.sqrt().add_(e), value=-self.lr)
 
 
+# jit.ScriptModule -> JIT C++ graph
+class CtrlCost(jit.ScriptModule):
+    def __init__(self):
+        super(CtrlCost, self).__init__()
+
+
+    @jit.script_method
+    def forward(self, a):
+        return torch.atanh(a**2).mean(dim=-1, keepdim=True).div_(math.e)
 
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
@@ -191,12 +200,12 @@ class FeedForward(jit.ScriptModule):
 
 
 class FeatureExtractor(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, f_nodes):
+    def __init__(self, state_dim, action_dim, h_dim, f_nodes, drop):
         super(FeatureExtractor, self).__init__()
 
 
-        self.ffw = FourierSeries(state_dim, h_dim, f_nodes)
-        self.val = FourierSeries(state_dim + f_nodes + action_dim, h_dim, f_nodes)
+        self.ffw = FourierSeries(state_dim, 512, f_nodes)
+        self.val = FeedForward(state_dim + f_nodes + action_dim, 640, f_nodes, drop)
         self.norm1 = nn.RMSNorm(state_dim + f_nodes)
         self.norm2 = nn.RMSNorm(state_dim + action_dim + 2*f_nodes)
         self.r = nn.Linear(f_nodes, 1)
@@ -219,13 +228,16 @@ class FeatureExtractor(jit.ScriptModule):
         return self.r(self.val(torch.cat([a, self.z(s)], dim=-1)))
 
 
+
+
+
 # jit.ScriptModule -> JIT C++ graph
 class Actor(jit.ScriptModule):
     def __init__(self, state_dim, h_dim, action_dim, drop=True):
         super().__init__()
 
         self.action_dim = action_dim
-        self.Adam = FeedForward(state_dim, h_dim, 3*action_dim, drop) #Actor is Adam
+        self.Adam = FeedForward(state_dim, 640, 3*action_dim, drop) #Actor is Adam
 
         self.eps = 1e-3
         self._eps = 1.0-self.eps
@@ -269,7 +281,7 @@ class ActorCritic(jit.ScriptModule):
         nodes = q_dist//3
 
 
-        self.fe = FeatureExtractor(state_dim, action_dim, h_dim, nodes)
+        self.fe = FeatureExtractor(state_dim, action_dim, h_dim, nodes, drop)
 
         self.actor = Actor(state_dim + nodes, h_dim, action_dim, drop)
         self.register_buffer('a_max', torch.as_tensor(max_action, dtype=torch.float32))
@@ -345,6 +357,7 @@ class Nets(jit.ScriptModule):
         self.rehse = ReHSE()
         self.rehae = ReHAE()
         self.sw = Swaddling()
+        self.cc = CtrlCost()
         self.tau = tau
 
     
@@ -380,7 +393,7 @@ class Nets(jit.ScriptModule):
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
         
 
-        q_target = reward + not_done_gamma * q_next_target_value - torch.atanh(action**2).mean(dim=-1, keepdim=True).div_(math.e)
+        q_target = reward + not_done_gamma * q_next_target_value - self.cc(action)
         q_pred, r_pred = self.online.critic_direct(state, action)
 
 
@@ -417,7 +430,7 @@ class Symphony(object):
 
     
     def select_action(self, state, active = True, test=False):
-        active, noise = float(active), float(test)
+        active, test = float(active), float(test)
         state = torch.as_tensor(state, dtype=torch.float32, device=self.device).reshape(-1,self.state_dim)
         with torch.no_grad(): action = self.nets.online.actor_play(state, active, test).detach().flatten()
         return action.cpu().numpy()
@@ -425,7 +438,7 @@ class Symphony(object):
 
     """
     def select_action(self, state, active = True, noise=True):
-        active, noise = float(active), float(noise)
+        active, test = float(active), float(noise)
         with torch.no_grad(): return self.nets.online.actor_play(state, active, noise)[0]
     """
 
