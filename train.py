@@ -26,7 +26,7 @@ print(device)
 learning_rate = 1e-4
 explore_time, times = 20000, 35
 capacity = explore_time * times
-h_dim = 512
+h_dim = 768
 batch_size = q_dist = 384
 alpha, tau = phi_, 0.001
 num_episodes = 100000
@@ -220,7 +220,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
             # if steps is close to episode limit (e.g. 900) we shut down actions to get Terminal Transition:
             active = steps<(limit_steps-100) if not testing else True
-            action = algo.select_action(state,  active=active, test=(testing or Q_learning)) #noise=(not testing)
+            action = algo.select_action(state,  active=active, test=testing) #noise=(not testing)
             next_state, reward, done, truncated, info = env.step(action)
 
             if not testing: algo.nets.replay_buffer.add(state, action, reward, next_state, done)
