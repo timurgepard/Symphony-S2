@@ -31,7 +31,7 @@ class Adam(optim.Optimizer):
         self.beta1, self.beta2 = betas
         self.beta1_, self.beta2_ = 1-self.beta1, 1-self.beta2
         self.decay_factor = 1.0 - self.lr * self.wd
-        self.eps = 1e-12
+        self.eps = 1e-8
         
 
 
@@ -72,10 +72,13 @@ class CtrlCost(jit.ScriptModule):
     def __init__(self):
         super(CtrlCost, self).__init__()
 
-
     @jit.script_method
     def forward(self, a):
-        return torch.atanh(a**2).mean(dim=-1, keepdim=True).div_(math.e)
+        return torch.atanh(a**2).div_(math.e)
+
+    @jit.script_method
+    def mean(self, a):
+        return self.forward(a).mean(dim=-1, keepdim=True)
 
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
@@ -108,17 +111,16 @@ class ReHAE(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        self.d = hidden_dim
         k = 1/math.sqrt(hidden_dim)
-        self.s = nn.Parameter(data=2.0*k*torch.rand(hidden_dim)-k, requires_grad=True)
-        self.b = nn.Parameter(data=2.0*k*torch.rand(hidden_dim)-k, requires_grad=True)
+        self.sb_ = nn.Parameter(data=2.0*k*torch.rand(2*hidden_dim)-k, requires_grad=True)
 
  
     @jit.script_method
     def forward(self, x):
-        s, b = torch.sigmoid(self.s), torch.sigmoid(self.b)
+        s, b_ = torch.sigmoid(self.sb_).chunk(2, dim=-1)
         x = s*torch.sin(x/s)
-        return x * torch.sigmoid(x/(b*s))
+        return x * torch.sigmoid(x/(s*b_))
+
 
 
 
@@ -143,6 +145,10 @@ class Swaddling(jit.ScriptModule):
     def __init__(self):
         super(Swaddling, self).__init__()
 
+        self.eps = 1e-8
+        self._eps = 1.0-self.eps
+
+
     @jit.script_method
     def Omega(self, x):
         return torch.log((1+x)/(1-x))
@@ -154,9 +160,8 @@ class Swaddling(jit.ScriptModule):
 
     @jit.script_method
     def forward(self, x, k):
+        x, k = x.clamp(self.eps, self._eps), k.clamp(self.eps, self._eps)
         return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k*k)).mean()
-
-
 
 
 
@@ -180,7 +185,7 @@ class FourierSeries(jit.ScriptModule):
 
 class FeedForward(jit.ScriptModule):
     def __init__(self, f_in, h_dim, f_out, drop):
-        super(FeedForward, self).__init__()
+        super().__init__()
 
 
         self.ffw = nn.Sequential(
@@ -200,16 +205,19 @@ class FeedForward(jit.ScriptModule):
 
 
 class FeatureExtractor(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, f_nodes, drop):
+    def __init__(self, state_dim, action_dim, state_high, state_low, f_dim, h_dim, f_nodes, drop):
         super(FeatureExtractor, self).__init__()
 
+        #self.register_buffer('s_min', torch.as_tensor(state_low, dtype=torch.float32))
+        #self.register_buffer('s_max', torch.as_tensor(state_high, dtype=torch.float32))
 
-        self.ffw = FourierSeries(state_dim, 512, f_nodes)
-        self.val = FeedForward(state_dim + f_nodes + action_dim, 640, f_nodes, drop)
+
+        self.ffw = FourierSeries(state_dim, f_dim, f_nodes)
+        self.rew = FeedForward(state_dim + f_nodes + action_dim, h_dim, f_nodes, drop)
         self.norm1 = nn.RMSNorm(state_dim + f_nodes)
         self.norm2 = nn.RMSNorm(state_dim + action_dim + 2*f_nodes)
         self.r = nn.Linear(f_nodes, 1)
-
+  
 
     @jit.script_method
     def z(self, s):
@@ -219,13 +227,14 @@ class FeatureExtractor(jit.ScriptModule):
     @jit.script_method
     def za(self, s, a):
         za = torch.cat([a, self.z(s)], dim=-1)
-        with torch.no_grad(): v = self.val(za)
-        return self.norm2(torch.cat([za, v], dim=-1))
+        with torch.no_grad(): fr = self.rew(za)
+        return self.norm2(torch.cat([za, fr], dim=-1))
+
 
 
     @jit.script_method
-    def estimate(self, s, a):
-        return self.r(self.val(torch.cat([a, self.z(s)], dim=-1)))
+    def transition(self, s, a):
+        return self.r(self.rew(torch.cat([a, self.z(s)], dim=-1)))
 
 
 
@@ -237,20 +246,14 @@ class Actor(jit.ScriptModule):
         super().__init__()
 
         self.action_dim = action_dim
-        self.Adam = FeedForward(state_dim, 640, 3*action_dim, drop) #Actor is Adam
-
-        self.eps = 1e-3
-        self._eps = 1.0-self.eps
+        self.Adam = FeedForward(state_dim, h_dim, 3*action_dim, drop) #Actor is Adam
 
 
 
     @jit.script_method
     def forward(self, state):
-        ASB = torch.tanh(self.Adam(state)/2).reshape(-1, 3, self.action_dim)
-        A = ASB [:, 0]
-        S = ASB[:, 1].abs().clamp(self.eps, self._eps)
-        B = ASB[:, 2].abs().clamp(self.eps, self._eps)
-        return A, S, B 
+        A, S, B = torch.tanh(self.Adam(state)/2).chunk(3, dim=-1)
+        return A, S.abs(), B.abs()
 
 
 
@@ -275,15 +278,15 @@ class Critic(jit.ScriptModule):
 
 # jit.ScriptModule -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, alpha, q_dist, max_action, drop=True):
+    def __init__(self, state_dim, action_dim, h_dim, alpha, q_dist, max_action, state_high, state_low, drop=True):
         super().__init__()
 
         nodes = q_dist//3
 
 
-        self.fe = FeatureExtractor(state_dim, action_dim, h_dim, nodes, drop)
+        self.fe = FeatureExtractor(state_dim, action_dim, state_high, state_low, 512, 640, nodes, drop)
 
-        self.actor = Actor(state_dim + nodes, h_dim, action_dim, drop)
+        self.actor = Actor(state_dim + nodes, 640, action_dim, drop)
         self.register_buffer('a_max', torch.as_tensor(max_action, dtype=torch.float32))
 
 
@@ -291,10 +294,10 @@ class ActorCritic(jit.ScriptModule):
         self.register_buffer('N', torch.empty((q_dist, action_dim)))
 
 
-        self.critic = Critic(state_dim + action_dim + 2*nodes, h_dim, nodes, drop)
+        self.critic = Critic(state_dim + action_dim + 2*nodes, 800, nodes, drop)
         
         indexes = torch.arange(0, q_dist, 1)/q_dist
-        weights = torch.exp(-0.5*(torch.abs(1-phi/2-indexes)/phi_)**10)
+        weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(2*math.e))
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.alpha = alpha
@@ -305,7 +308,8 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor_soft(self, state):
         A, S, B = self.actor(self.fe.z(state))
-        return self.a_max * torch.tanh(S * A + self.N), S, B, B.detach()
+        E = B.detach().mean(dim=-1, keepdim=True)
+        return self.a_max * torch.tanh(S * A + self.N), S, B, E
 
 
     @jit.script_method
@@ -327,7 +331,7 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def critic_direct(self, state, action):
         q_pred = self.critic(self.fe.za(state, action))
-        r_pred = self.fe.estimate(state, action)
+        r_pred = self.fe.transition(state, action)
         return q_pred, r_pred
         
 
@@ -341,10 +345,10 @@ class ActorCritic(jit.ScriptModule):
 
 
 class Nets(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, capacity, device):
+    def __init__(self, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, state_high, state_low, capacity, device):
         super(Nets, self).__init__()
 
-        self.init(state_dim, action_dim, h_dim, alpha, q_dist, max_action, device)
+        self.init(state_dim, action_dim, h_dim, alpha, q_dist, max_action, state_high, state_low, device)
         self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, batch_size, device)
 
         self.state_dim = state_dim
@@ -363,10 +367,10 @@ class Nets(jit.ScriptModule):
     
 
 
-    def init(self, state_dim, action_dim, h_dim, alpha, q_dist, max_action, device):
+    def init(self, state_dim, action_dim, h_dim, alpha, q_dist, max_action, state_high, state_low, device):
 
-        self.online = ActorCritic(state_dim, action_dim, h_dim, alpha, q_dist, max_action, drop=True).to(device)
-        self.target = ActorCritic(state_dim, action_dim, h_dim, alpha, q_dist, max_action, drop=False).to(device)
+        self.online = ActorCritic(state_dim, action_dim, h_dim, alpha, q_dist, max_action, state_high, state_low, drop=True).to(device)
+        self.target = ActorCritic(state_dim, action_dim, h_dim, alpha, q_dist, max_action, state_high, state_low, drop=False).to(device)
         self.target.load_state_dict(self.online.state_dict())
         for param in self.target.parameters(): param.requires_grad = False
                     
@@ -391,13 +395,12 @@ class Nets(jit.ScriptModule):
 
         next_action, next_scale, next_beta, next_eta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
-        
 
-        q_target = reward + not_done_gamma * q_next_target_value - self.cc(action)
+        q_target = next_eta * reward + not_done_gamma * q_next_target_value
         q_pred, r_pred = self.online.critic_direct(state, action)
 
 
-        net_loss = self.rehse(r_pred - reward) + self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta)
+        net_loss =  self.rehse(r_pred - reward) + self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta)
         net_loss.backward()
 
  
@@ -415,7 +418,7 @@ class Nets(jit.ScriptModule):
 
 
 class Symphony(object):
-    def __init__(self, capacity, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, learning_rate, device):
+    def __init__(self, capacity, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, state_high, state_low, learning_rate, device):
         super(Symphony, self).__init__()
 
         self.state_dim = state_dim
@@ -424,7 +427,7 @@ class Symphony(object):
         beta1, beta2 = alpha, 1-tau
 
 
-        self.nets = Nets(state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, capacity, device)
+        self.nets = Nets(state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, state_high, state_low, capacity, device)
         self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate, betas=(beta1, beta2))
 
 
@@ -579,5 +582,5 @@ class ReplayBuffer(jit.ScriptModule):
 
         # 4. Probabilities (Pre-calculated for the compiler)
         indexes = torch.arange(0, self.capacity, 1, device=self.device) / self.capacity
-        weights = torch.exp(-0.5*(torch.abs(indexes - phi / 2) / phi_) ** 10)
+        weights = torch.exp(-(torch.abs(indexes - phi / 2) / phi_) ** (2*math.e))
         self.probs.copy_(weights / torch.sum(weights))
