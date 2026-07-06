@@ -24,7 +24,7 @@ torch.cuda.empty_cache()
 print(device)
 
 learning_rate = 1e-4
-explore_time, times = 20000, 35
+explore_time, times = 20000, 50
 capacity = explore_time * times
 h_dim = 768
 batch_size = q_dist = 384
@@ -51,7 +51,7 @@ action_dim= env.action_space.shape[0]
 #max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
 max_action = torch.ones(action_dim)
 
-algo = Symphony(capacity, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, learning_rate, device)
+algo = Symphony(capacity, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, state_high, state_low, learning_rate, device)
 
 
 print("action_dim: ", action_dim, "state_dim: ", state_dim)
@@ -186,7 +186,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
 
     for episode in range(start_episode, episodes+1):
 
-        if total_steps>=3000000: break
+        if total_steps>=5000000: break
             
         Return = 0.0     
         state = env.reset()[0]
@@ -209,7 +209,7 @@ def sim_loop(env, episodes, testing, Q_learning, algo, episode_return, episode_s
                     
 
             # if total steps is divisible to 2500 save models, stop training and do testing, return to training:
-            if Q_learning and total_steps>=10000 and total_steps%10000==0:
+            if Q_learning and total_steps>=explore_time and total_steps%10000==0:
                 save(algo, episode_return, episode_steps, total_steps)
                 
                 print("start testing")
