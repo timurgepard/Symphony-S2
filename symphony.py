@@ -161,7 +161,8 @@ class Swaddling(jit.ScriptModule):
     @jit.script_method
     def forward(self, x, k):
         x, k = x.clamp(self.eps, self._eps), k.clamp(self.eps, self._eps)
-        return (self.Omega(x**(1/k.detach())) + k * self.omega(x) + self.Omega(k*k)).mean()
+        sw, k2 = self.Omega(x**(1/k.detach())) + k * self.omega(x), self.Omega(k*k)
+        return sw.mean() + k2.mean(), sw.detach().mean(dim=-1, keepdim=True)
 
 
 
@@ -294,6 +295,7 @@ class ActorCritic(jit.ScriptModule):
         self.register_buffer('N', torch.empty((q_dist, action_dim)))
 
 
+
         self.critic = Critic(state_dim + action_dim + 2*nodes, 800, nodes, drop)
         
         indexes = torch.arange(0, q_dist, 1)/q_dist
@@ -308,8 +310,7 @@ class ActorCritic(jit.ScriptModule):
     @jit.script_method
     def actor_soft(self, state):
         A, S, B = self.actor(self.fe.z(state))
-        E = B.detach().mean(dim=-1, keepdim=True)
-        return self.a_max * torch.tanh(S * A + self.N), S, B, E
+        return self.a_max * torch.tanh(S * A + self.N), S, B
 
 
     @jit.script_method
@@ -345,11 +346,8 @@ class ActorCritic(jit.ScriptModule):
 
 
 class Nets(jit.ScriptModule):
-    def __init__(self, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, state_high, state_low, capacity, device):
+    def __init__(self, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, state_high, state_low, capacity, learning_rate, device):
         super(Nets, self).__init__()
-
-        self.init(state_dim, action_dim, h_dim, alpha, q_dist, max_action, state_high, state_low, device)
-        self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, batch_size, device)
 
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -357,12 +355,20 @@ class Nets(jit.ScriptModule):
         self.max_action = max_action
         self.device = device
 
-
         self.rehse = ReHSE()
         self.rehae = ReHAE()
         self.sw = Swaddling()
-        self.cc = CtrlCost()
         self.tau = tau
+
+
+        self.init(state_dim, action_dim, h_dim, alpha, q_dist, max_action, state_high, state_low, device)
+        self.replay_buffer = ReplayBuffer(capacity, state_dim, action_dim, batch_size, device)
+        self.optimizer = Adam(self.online.parameters(), lr=learning_rate, betas=(alpha, 1-tau))
+
+
+
+
+
 
     
 
@@ -390,27 +396,26 @@ class Nets(jit.ScriptModule):
     @jit.script_method
     def update(self):
 
-
         state, action, reward, next_state, not_done_gamma = self.replay_buffer.sample()
 
-        next_action, next_scale, next_beta, next_eta = self.online.actor_soft(next_state)
+        next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         q_next_target, q_next_target_value, q_next_ema = self.target.critic_soft(next_state, next_action)
 
-        q_target = next_eta * reward + not_done_gamma * q_next_target_value
+        sw_and_beta_loss, sw_value  = self.sw(next_scale, next_beta)
+
+        q_target = reward + not_done_gamma * (q_next_target_value - sw_value)
         q_pred, r_pred = self.online.critic_direct(state, action)
 
 
-        net_loss =  self.rehse(r_pred - reward) + self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + self.sw(next_scale, next_beta)
+        net_loss = self.rehse(r_pred - reward) + self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + sw_and_beta_loss
         net_loss.backward()
-
- 
 
 
 
     @jit.script_method
     def data(self):
         next_state = self.replay_buffer.sample()[3]
-        with torch.no_grad(): next_action, next_scale, next_beta, next_eta = self.online.actor_soft(next_state)
+        with torch.no_grad(): next_action, next_scale, next_beta = self.online.actor_soft(next_state)
         with torch.no_grad(): q_ema, q_std = self.target.critic_data(next_state, next_action)
         return next_action.detach().mean(), next_scale.detach().mean(), next_beta.detach().mean(), q_ema.mean(), q_std.mean()
 
@@ -424,12 +429,8 @@ class Symphony(object):
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.device = device
-        beta1, beta2 = alpha, 1-tau
-
-
-        self.nets = Nets(state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, state_high, state_low, capacity, device)
-        self.nets_optimizer = Adam(self.nets.online.parameters(), lr=learning_rate, betas=(beta1, beta2))
-
+        
+        self.nets = Nets(state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, state_high, state_low, capacity, learning_rate, device)
 
     
     def select_action(self, state, active = True, test=False):
@@ -449,15 +450,10 @@ class Symphony(object):
 
     def train(self):
         torch.manual_seed(random.randint(0,2**32-1))
-        self.update()
-
-
-    def update(self):
-        self.nets_optimizer.zero_grad(set_to_none=True)
+        self.nets.optimizer.zero_grad(set_to_none=True)
         self.nets.update()
-        self.nets_optimizer.step()
+        self.nets.optimizer.step()
         self.nets.tau_update()
-
         
 
 
