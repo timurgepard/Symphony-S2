@@ -37,6 +37,7 @@ episode_rewards, episode_steps, Q_learning, total_steps = [], [], False, 0
 
 # environment type.
 env_name = 'Humanoid-v4'
+#env_name = 'InvertedDoublePendulum-v4'
 
 
 pre_valid = True # testing models when loaded
@@ -105,7 +106,7 @@ class LogFile(object):
         with open(self.log_name_main, 'w') as file:
             file.write("step,return\n")
         with open(self.log_name_opt, 'w') as file:
-            file.write("ep,return,steps,q_std,q_ema,scale\n")
+            file.write("ep,return,q_std,q_ema,scale\n")
 
 
 numbers = extract_r1_r2_r3()
@@ -126,8 +127,7 @@ def save(algo, episode_return, episode_steps, total_steps):
 
     torch.save(algo.nets.online.state_dict(), 'nets_online_model.pt')
     torch.save(algo.nets.target.state_dict(), 'nets_target_model.pt')
-    #torch.save(algo.nets.ofe.state_dict(), 'nets_ofe_model.pt')
-    torch.save(algo.nets_optimizer.state_dict(), 'nets_optimizer.pt')
+    torch.save(algo.nets.optimizer.state_dict(), 'nets_optimizer.pt')
     torch.save(algo.nets.replay_buffer.state_dict(), 'nets_replay_buffer.pt')
     print("saving... the buffer length = ", algo.nets.replay_buffer.length.item(), " avg return = ", average_return, " avg steps = ", average_steps, end="")
     with open('data', 'wb') as file:
@@ -144,8 +144,7 @@ def load(algo, Q_learning):
         print("loading models...")
         algo.nets.online.load_state_dict(torch.load('nets_online_model.pt', weights_only=True))
         algo.nets.target.load_state_dict(torch.load('nets_target_model.pt', weights_only=True))
-        #algo.nets.ofe.load_state_dict(torch.load('nets_ofe_model.pt', weights_only=True))
-        algo.nets_optimizer.load_state_dict(torch.load('nets_optimizer.pt', weights_only=True))
+        algo.nets.optimizer.load_state_dict(torch.load('nets_optimizer.pt', weights_only=True))
         print('models loaded')
         if pre_valid: sim_loop(env_valid, 100, True, False, algo, [], [], total_steps==0, limit_steps=limit_test)
     except:
