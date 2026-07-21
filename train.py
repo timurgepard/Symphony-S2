@@ -26,8 +26,8 @@ print(device)
 learning_rate = 1e-4
 explore_time, times = 20000, 50
 capacity = explore_time * times
-h_dim = 768
-batch_size = q_dist = 384
+h_dim = 512
+batch_size = q_dist = 255
 alpha, tau = phi_, 0.001
 num_episodes = 100000
 limit_test = 1000
