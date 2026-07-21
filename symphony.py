@@ -67,18 +67,7 @@ class Adam(optim.Optimizer):
                 p.mul_(self.decay_factor).addcdiv_(m, v.sqrt().add_(e), value=-self.lr)
 
 
-# jit.ScriptModule -> JIT C++ graph
-class CtrlCost(jit.ScriptModule):
-    def __init__(self):
-        super(CtrlCost, self).__init__()
 
-    @jit.script_method
-    def forward(self, a):
-        return torch.atanh(a**2).div_(math.e)
-
-    @jit.script_method
-    def mean(self, a):
-        return self.forward(a).mean(dim=-1, keepdim=True)
 
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
@@ -283,11 +272,12 @@ class ActorCritic(jit.ScriptModule):
         super().__init__()
 
         nodes = q_dist//3
+        f_dim = 64
 
 
-        self.fe = FeatureExtractor(state_dim, action_dim, state_high, state_low, 512, 640, nodes, drop)
+        self.fe = FeatureExtractor(state_dim, action_dim, state_high, state_low, 448, 512, f_dim, drop)
 
-        self.actor = Actor(state_dim + nodes, 640, action_dim, drop)
+        self.actor = Actor(state_dim + f_dim, 512, action_dim, drop)
         self.register_buffer('a_max', torch.as_tensor(max_action, dtype=torch.float32))
 
 
@@ -296,7 +286,7 @@ class ActorCritic(jit.ScriptModule):
 
 
 
-        self.critic = Critic(state_dim + action_dim + 2*nodes, 800, nodes, drop)
+        self.critic = Critic(state_dim + action_dim + 2*f_dim, 576, nodes, drop)
         
         indexes = torch.arange(0, q_dist, 1)/q_dist
         weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(2*math.e))
@@ -338,7 +328,7 @@ class ActorCritic(jit.ScriptModule):
 
 
     @jit.script_method
-    def critic_data(self, state, action):
+    def critic_info(self, state, action):
         q =  self.critic(self.fe.za(state, action))
         q_std = q.std(dim=-1, keepdim=True)/q.detach().pow(2).mean(dim=-1, keepdim=True).sqrt()
         return self.q_ema.clone(), q_std
@@ -367,12 +357,6 @@ class Nets(jit.ScriptModule):
 
 
 
-
-
-
-    
-
-
     def init(self, state_dim, action_dim, h_dim, alpha, q_dist, max_action, state_high, state_low, device):
 
         self.online = ActorCritic(state_dim, action_dim, h_dim, alpha, q_dist, max_action, state_high, state_low, drop=True).to(device)
@@ -385,10 +369,8 @@ class Nets(jit.ScriptModule):
     @torch.no_grad()
     def tau_update(self):
 
-        online = chain(self.target.critic.parameters(), self.target.fe.parameters())
-        target = chain(self.online.critic.parameters(), self.online.fe.parameters())
 
-        for target_param, param in zip(online, target):
+        for target_param, param in zip(self.target.parameters(), self.online.parameters()):
             target_param.lerp_(param, self.tau)
 
 
@@ -416,7 +398,7 @@ class Nets(jit.ScriptModule):
     def data(self):
         next_state = self.replay_buffer.sample()[3]
         with torch.no_grad(): next_action, next_scale, next_beta = self.online.actor_soft(next_state)
-        with torch.no_grad(): q_ema, q_std = self.target.critic_data(next_state, next_action)
+        with torch.no_grad(): q_ema, q_std = self.target.critic_info(next_state, next_action)
         return next_action.detach().mean(), next_scale.detach().mean(), next_beta.detach().mean(), q_ema.mean(), q_std.mean()
 
 
