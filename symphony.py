@@ -98,7 +98,7 @@ class ReHAE(jit.ScriptModule):
 #ReSine Activation Function
 # jit.ScriptModule -> JIT C++ graph
 class ReSine(jit.ScriptModule):
-    def __init__(self, hidden_dim=256):
+    def __init__(self, hidden_dim=384):
         super(ReSine, self).__init__()
         k = 1/math.sqrt(hidden_dim)
         self.sb_ = nn.Parameter(data=2.0*k*torch.rand(2*hidden_dim)-k, requires_grad=True)
@@ -150,8 +150,8 @@ class Swaddling(jit.ScriptModule):
     @jit.script_method
     def forward(self, x, k):
         x, k = x.clamp(self.eps, self._eps), k.clamp(self.eps, self._eps)
-        sw = (self.Omega(x**(1/k.detach())) + k * self.omega(x)).mean(dim=-1, keepdim=True)
-        k2 = self.Omega(k*k).mean(dim=-1, keepdim=True)
+        sw = (self.Omega(x**(1/k.detach())) + k * self.omega(x)).sum(dim=-1, keepdim=True)
+        k2 = self.Omega(k*k).sum(dim=-1, keepdim=True)
         return sw.mean() + k2.mean(), sw.detach()
 
 
@@ -162,9 +162,9 @@ class FourierSeries(jit.ScriptModule):
         super(FourierSeries, self).__init__()
 
         self.ffw = nn.Sequential(
-            nn.Linear(f_in, 768),
-            ReSine(768),
-            nn.Linear(768, z_dim)
+            nn.Linear(f_in, 384),
+            ReSine(384),
+            nn.Linear(384, z_dim)
         )
 
     @jit.script_method
@@ -180,11 +180,11 @@ class FeedForward(jit.ScriptModule):
 
 
         self.ffw = nn.Sequential(
-            nn.Linear(f_in, 768),
-            nn.LayerNorm(768),
-            nn.Linear(768, 768),
-            ReSine(768),
-            nn.Linear(768, z_dim),
+            nn.Linear(f_in, 384),
+            nn.LayerNorm(384),
+            nn.Linear(384, 384),
+            ReSine(384),
+            nn.Linear(384, z_dim),
             GradientDropout(drop)
         )
 
@@ -275,12 +275,13 @@ class ActorCritic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, alpha, q_dist, max_action, drop=True):
         super().__init__()
 
-        fn = 64
+        fn = q_dist//6
+        z_dim = q_dist
 
 
         self.fe = FeatureExtractor(state_dim, fn, action_dim, drop)
 
-        self.actor = Actor(state_dim + fn, 384, action_dim, drop)
+        self.actor = Actor(state_dim + fn, z_dim, action_dim, drop)
         self.register_buffer('a_max', torch.as_tensor(max_action, dtype=torch.float32))
 
 
@@ -289,7 +290,7 @@ class ActorCritic(jit.ScriptModule):
 
 
 
-        self.critic = Critic(state_dim + action_dim + 2*fn, 384, q_dist, drop)
+        self.critic = Critic(state_dim + action_dim + 2*fn, z_dim, q_dist, drop)
         
         indexes = torch.arange(0, q_dist, 1)/q_dist
         weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(2*math.e))
@@ -480,7 +481,6 @@ class ReplayBuffer(jit.ScriptModule):
 
     def add(self, state, action, reward, next_state, done):
 
-        reward += 0.1 * np.sum(action**2)
 
         if self.length.item() < self.capacity:
             self.length.add_(1)
