@@ -37,7 +37,9 @@ stage = {"exploration": True, "training": False, "testing": False}
 
 # environment type.
 env_name = 'Humanoid-v4'
-#env_name = 'InvertedDoublePendulum-v4'
+#env_name = 'BipedalWalker-v3'
+#env_name = 'HalfCheetah-v4'
+
 
 
 pre_valid = True # testing models when loaded
@@ -59,6 +61,7 @@ print("action_dim: ", action_dim, "state_dim: ", state_dim)
 print("max_action:", max_action)
 print("batch_size", batch_size)
 print("q distribuion", q_dist)
+print("Replay Buffer capacity", algo.nets.replay_buffer.capacity)
 
 
 
