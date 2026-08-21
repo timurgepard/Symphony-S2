@@ -24,9 +24,9 @@ torch.cuda.empty_cache()
 print(device)
 
 learning_rate = 1e-4
-explore_time, times = 20000, 50
+explore_time, times = 10000, 50
 capacity = explore_time * times
-batch_size = q_dist = 384
+batch_size = q_dist = 192
 alpha, tau = phi_, 0.001
 num_episodes = 100000
 limit_test = 1000
@@ -190,7 +190,7 @@ def sim_loop(env, episodes, stage, algo, episode_return, episode_steps, total_st
 
     for episode in range(start_episode, episodes+1):
 
-        if total_steps>=5000000: break
+        if total_steps>=3000000: break
             
         Return = 0.0     
         state = env.reset()[0]
