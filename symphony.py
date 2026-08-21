@@ -101,14 +101,13 @@ class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=384):
         super(ReSine, self).__init__()
         k = 1/math.sqrt(hidden_dim)
-        self.sb_ = nn.Parameter(data=2.0*k*torch.rand(2*hidden_dim)-k, requires_grad=True)
+        self.b_ = nn.Parameter(data=2.0*k*torch.rand(hidden_dim)-k, requires_grad=True)
 
- 
+
     @jit.script_method
     def forward(self, x):
-        s, b_ = torch.sigmoid(self.sb_).chunk(2, dim=-1)
-        x = s*torch.sin(x/s)
-        return x * torch.sigmoid(x/(s*b_))
+        x = torch.sin(x)
+        return x * torch.sigmoid(x/torch.sigmoid(self.b_))
 
 
 
@@ -124,8 +123,7 @@ class GradientDropout(jit.ScriptModule):
     @jit.script_method
     def forward(self, x):
         if not self.training or not self.drop: return x
-        p = torch.sigmoid(torch.randn_like(x))
-        mask = (torch.rand_like(x) > p).float()
+        mask = (torch.rand_like(x) > 0.5).float()
         return mask * x + (1.0 - mask) * x.detach()
 
 
@@ -150,8 +148,8 @@ class Swaddling(jit.ScriptModule):
     @jit.script_method
     def forward(self, x, k):
         x, k = x.clamp(self.eps, self._eps), k.clamp(self.eps, self._eps)
-        sw = (self.Omega(x**(1/k.detach())) + k * self.omega(x)).sum(dim=-1, keepdim=True)
-        k2 = self.Omega(k*k).sum(dim=-1, keepdim=True)
+        sw = (self.Omega(x**(1/k.detach())) + k * self.omega(x)).mean(dim=-1, keepdim=True)
+        k2 = self.Omega(k*k).mean(dim=-1, keepdim=True)
         return sw.mean() + k2.mean(), sw.detach()
 
 
@@ -275,13 +273,13 @@ class ActorCritic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, alpha, q_dist, max_action, drop=True):
         super().__init__()
 
-        fn = q_dist//6
+        fn = q_dist//8
         z_dim = q_dist
 
 
         self.fe = FeatureExtractor(state_dim, fn, action_dim, drop)
 
-        self.actor = Actor(state_dim + fn, z_dim, action_dim, drop)
+        self.actor = Actor(state_dim + fn, z_dim , action_dim, drop)
         self.register_buffer('a_max', torch.as_tensor(max_action, dtype=torch.float32))
 
 
@@ -315,7 +313,8 @@ class ActorCritic(jit.ScriptModule):
         self.q_ema.mul_(self.alpha).add_(q_soft_detached.mean(), alpha=self._alpha)
         return  q_soft, q_soft_detached, self.q_ema.clone()
 
-
+    # ===============================================================================
+    # Methods created for simplicity and readability:
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, test:float=0.0):
         A, S, B = self.actor(self.fe.z(state))
@@ -330,14 +329,13 @@ class ActorCritic(jit.ScriptModule):
         return q_pred, r_pred
         
 
-
     @jit.script_method
     def critic_info(self, state, action):
         q =  self.critic(self.fe.za(state, action))
         q_std = q.std(dim=-1, keepdim=True)/q.detach().pow(2).mean(dim=-1, keepdim=True).sqrt()
         return self.q_ema.clone(), q_std
 
-
+    # ===============================================================================
 
 class Nets(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, alpha, tau, q_dist, batch_size, max_action, capacity, learning_rate, device):
@@ -481,6 +479,7 @@ class ReplayBuffer(jit.ScriptModule):
 
     def add(self, state, action, reward, next_state, done):
 
+        reward += 0.1 * np.sum(action**2)
 
         if self.length.item() < self.capacity:
             self.length.add_(1)
