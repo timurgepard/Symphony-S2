@@ -37,8 +37,6 @@ stage = {"exploration": True, "training": False, "testing": False}
 
 # environment type.
 env_name = 'Humanoid-v4'
-#env_name = 'BipedalWalker-v3'
-#env_name = 'HalfCheetah-v4'
 
 
 
