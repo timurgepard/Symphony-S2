@@ -7,7 +7,7 @@ import torch
 import numpy as np
 import random, math
 import pickle
-import os, re
+import os, re, time
 
 # global constants:
 phi = (math.sqrt(5)+1)/2 #1.618...
@@ -38,10 +38,11 @@ stage = {"exploration": True, "training": False, "testing": False}
 
 # environment type.
 env_name = 'Humanoid-v4'
+#env_name = 'BipedalWalker-v3'
+#env_name = 'HalfCheetah-v4'
 
 
-
-pre_valid = True # testing models when loaded
+pre_valid = False # testing models when loaded
 env = gym.make(env_name)
 env_test = gym.make(env_name)
 env_valid = gym.make(env_name, render_mode="human")
@@ -53,7 +54,6 @@ action_dim= env.action_space.shape[0]
 #max_action = torch.FloatTensor(env.action_space.high) if env.action_space.is_bounded() else torch.ones(action_dim)
 max_action = torch.ones(action_dim)
 
-
 algo = Symphony(capacity, state_dim, action_dim, h_dim, alpha, tau, q_dist, batch_size, max_action, state_high, state_low, learning_rate, device)
 
 
@@ -61,7 +61,6 @@ print("action_dim: ", action_dim, "state_dim: ", state_dim)
 print("max_action:", max_action)
 print("batch_size", batch_size)
 print("q distribuion", q_dist)
-print("Replay Buffer capacity", algo.nets.replay_buffer.capacity)
 
 
 
@@ -162,6 +161,7 @@ def load(algo, stage):
             episode_return = dict['episode_return']
             episode_steps = dict['episode_steps']
             total_steps = dict['total_steps']
+            print(algo.nets.replay_buffer.length)
             if algo.nets.replay_buffer.length>=explore_time and not stage["training"]: 
                 stage = {"exploration": False, "training": True, "testing": False}
         
@@ -199,8 +199,6 @@ def sim_loop(env, episodes, stage, algo, episode_return, episode_steps, total_st
 
             total_steps += 1
 
-            
-
             # Activate training if explore time is reached and if it is not testing mode:
             if not stage["testing"]:
                 if algo.nets.replay_buffer.length>=explore_time and not stage["training"]:
@@ -222,15 +220,20 @@ def sim_loop(env, episodes, stage, algo, episode_return, episode_steps, total_st
 
 
             # if steps is close to episode limit (e.g. 900) we shut down actions to get Terminal Transition:
-            active = True if stage["testing"] else (steps<(limit_steps-100))
-            action = algo.select_action(state,  active=active, test=stage["testing"]) 
+            action = algo.select_action(state,  active=True, test=stage["testing"]) 
+            #t0 = time.perf_counter()
             next_state, reward, done, truncated, info = env.step(action)
+            #t_env = time.perf_counter()
 
             if not stage["testing"]: algo.nets.replay_buffer.add(state, action, reward, next_state, done)
-            Return += reward
-            
+            #t_rb = time.perf_counter()
+
             # actual training
             if stage["training"]: algo.train()
+            #t_gpu = time.perf_counter()
+            #print(f"Env: {(t_env - t0)*1000:.2f}ms | Buffer: {(t_rb - t_env)*1000:.2f}ms | Train: {(t_gpu - t_rb)*1000:.2f}ms")  
+
+            Return += reward
             if done: break
             state = next_state
         
