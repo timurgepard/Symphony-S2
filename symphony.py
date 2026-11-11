@@ -1,12 +1,8 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import math
 import torch.jit as jit
-import torch.nn.functional as F
-import random
-import numpy as np
-from itertools import chain
+from runtime import Adam, ReHSE, ReHAE, FourierSeries, FeedForward, FeedForwardTrinity, Swaddling
 
 # global constants:
 phi = (math.sqrt(5)+1)/2 #1.618...
@@ -19,185 +15,6 @@ phi_ = 1/phi #0.618...
 #==============================================================================================
 
     
-
-
-
-class Adam(optim.Optimizer):
-    def __init__(self, params, lr=3e-4, weight_decay=0.01, betas=(0.9, 0.999)):
-        defaults = dict(lr=lr, betas=betas)
-        super().__init__(params, defaults)
-        self.wd = weight_decay
-        self.lr = lr
-        self.beta1, self.beta2 = betas
-        self.beta1_, self.beta2_ = 1-self.beta1, 1-self.beta2
-        self.decay_factor = 1.0 - self.lr * self.wd
-        self.eps = 1e-8
-        
-
-
-
-    @torch.no_grad()
-    def step(self):
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-
-                grad = p.grad
-
-                state = self.state[p]
-                if len(state) == 0:
-                    state['m'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['v'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['e'] = torch.tensor(1-self.eps, device=p.device, dtype=p.dtype)
-
-                m = state['m']
-                v = state['v']
-                e = state['e']
-
-            
-                # Update biased first moment estimate
-                m.mul_(self.beta1).add_(grad, alpha=self.beta1_)
-                # Update biased second raw moment estimate
-                v.mul_(self.beta2).addcmul_(grad, grad, value=self.beta2_)
-
-                e.mul_(self.beta2).add_(self.eps, alpha=self.beta2_)
-
-                # Update parameters
-                p.mul_(self.decay_factor).addcdiv_(m, v.sqrt().add_(e), value=-self.lr)
-
-
-
-
-
-#Rectified Huber Symmetric Error Loss Function via JIT Module
-# jit.ScriptModule -> JIT C++ graph
-class ReHSE(jit.ScriptModule):
-    def __init__(self):
-        super(ReHSE, self).__init__()
-
-    @jit.script_method
-    def forward(self, e):
-        return (e * torch.tanh(e/2)).mean()
-
-
-
-#Rectified Huber Asymmetric Error Loss Function via JIT Module
-# jit.ScriptModule -> JIT C++ graph
-class ReHAE(jit.ScriptModule):
-    def __init__(self):
-        super(ReHAE, self).__init__()
-
-    @jit.script_method
-    def forward(self, e):
-        return (torch.abs(e) * torch.tanh(e/2)).mean()
-
-
-
-
-#ReSine Activation Function
-# jit.ScriptModule -> JIT C++ graph
-class ReSine(jit.ScriptModule):
-    def __init__(self, hidden_dim=256):
-        super(ReSine, self).__init__()
-        k = 1/math.sqrt(hidden_dim)
-        self.sb_ = nn.Parameter(data=2.0*k*torch.rand(2*hidden_dim)-k, requires_grad=True)
-
-
-    @jit.script_method
-    def forward(self, x):
-        s, b_ = torch.sigmoid(self.sb_).chunk(2, dim=-1)
-        x = s*torch.sin(x/s)
-        return x * torch.sigmoid(x/(b_*s))
-
-
-
-
-#GradientDropout:
-# jit.ScriptModule -> JIT C++ graph
-class GradientDropout(jit.ScriptModule):
-    def __init__(self, drop = True):
-        super(GradientDropout, self).__init__()
-        self.drop = drop
-
-
-    @jit.script_method
-    def forward(self, x):
-        if not self.training or not self.drop: return x
-        p = torch.sigmoid(torch.randn_like(x))
-        mask = (torch.rand_like(x) > p).float()
-        return mask * x + (1.0 - mask) * x.detach()
-
-
-
-class Swaddling(jit.ScriptModule):
-    def __init__(self):
-        super(Swaddling, self).__init__()
-
-        self.eps = 1e-8
-        self._eps = 1.0-self.eps
-
-
-    @jit.script_method
-    def Omega(self, x):
-        return torch.log((1+x)/(1-x))
-
-    @jit.script_method
-    def omega(self, x):
-        return x*torch.log(x)
-
-
-    @jit.script_method
-    def forward(self, x, k):
-        x, k = x.clamp(self.eps, self._eps), k.clamp(self.eps, self._eps)
-        sw = (self.Omega(x**(1/k.detach())) + k * self.omega(x)).mean(dim=-1, keepdim=True)
-        k2 = self.Omega(k*k).mean(dim=-1, keepdim=True)
-        return sw.mean() + k2.mean(), sw.detach()
-
-
-
-
-class FourierSeries(jit.ScriptModule):
-    def __init__(self, f_in, h_dim, z_dim):
-        super(FourierSeries, self).__init__()
-
-        self.ffw = nn.Sequential(
-            nn.Linear(f_in, h_dim),
-            ReSine(h_dim),
-            nn.Linear(h_dim, z_dim)
-        )
-
-    @jit.script_method
-    def forward(self, x):
-        return self.ffw(x)
-
-
-
-
-class FeedForward(jit.ScriptModule):
-    def __init__(self, f_in, h_dim, z_dim, f_out, drop):
-        super().__init__()
-
-
-        self.ffw = nn.Sequential(
-            nn.Linear(f_in, h_dim),
-            nn.LayerNorm(h_dim),
-            nn.Linear(h_dim, h_dim),
-            ReSine(h_dim),
-            nn.Linear(h_dim, z_dim),
-            GradientDropout(drop)
-        )
-
-        self.out = nn.Linear(z_dim, f_out)
-
-    @jit.script_method
-    def latent(self, x):
-        return self.ffw(x)
-
-    @jit.script_method
-    def forward(self, x):
-        return self.out(self.ffw(x))
-
 
 
 class FeatureExtractor(jit.ScriptModule):
@@ -250,25 +67,17 @@ class Actor(jit.ScriptModule):
 
 
 
-# jit.ScriptModule -> JIT C++ graph
 class Critic(jit.ScriptModule):
-    def __init__(self, state_action_dim, h_dim, z_dim, q_dist, drop=True):
+    def __init__(self, state_action_dim: int, h_dim: int, z_dim: int, q_dist: int, drop: bool = True):
         super().__init__()
-
-        q_nodes = q_dist//3
-
-        self.Yahweh = FeedForward(state_action_dim, h_dim, z_dim, q_nodes, drop)
-        self.Yeshua = FeedForward(state_action_dim, h_dim, z_dim, q_nodes, drop)
-        self.RuachY = FeedForward(state_action_dim, h_dim, z_dim, q_nodes, drop)
-        self.God = nn.ModuleList([self.Yahweh, self.Yeshua, self.RuachY])
- 
+        q_nodes = q_dist // 3
+        self.God = FeedForwardTrinity(state_action_dim, h_dim, z_dim, q_nodes, drop)
 
     @jit.script_method
     def forward(self, state_action):
-        return torch.cat([Lord(state_action) for Lord in self.God], dim=-1)
-
-
-
+        x3d = state_action.unsqueeze(0).expand(3, -1, -1)
+        # (3, batch, q_nodes) -> (batch, 3, q_nodes) -> (batch, q_dist)
+        return self.God(x3d).transpose(0, 1).reshape(state_action.size(0), -1)
 
 # jit.ScriptModule -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
@@ -279,7 +88,7 @@ class ActorCritic(jit.ScriptModule):
         z_dim = q_dist
 
 
-        self.fe = FeatureExtractor(state_dim, h_dim, fn, action_dim, drop)
+        self.fe = FeatureExtractor(state_dim, h_dim, fn, action_dim, drop=False)
 
         self.actor = Actor(state_dim + fn, h_dim, z_dim, action_dim, drop)
         self.register_buffer('a_max', torch.as_tensor(max_action, dtype=torch.float32))
@@ -395,6 +204,7 @@ class Nets(jit.ScriptModule):
         q_target = reward + not_done_gamma * (q_next_target_value - sw_value)
         q_pred, r_pred = self.online.critic_direct(state, action)
 
+
         net_loss = self.rehse(r_pred - reward) + self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + sw_and_beta_loss
         net_loss.backward()
 
@@ -437,7 +247,6 @@ class Symphony(object):
 
 
     def train(self):
-        torch.manual_seed(random.randint(0,2**32-1))
         self.update()
 
 
@@ -455,63 +264,86 @@ class Symphony(object):
 
 
 class ReplayBuffer(jit.ScriptModule):
-    def __init__(self, capacity, state_dim, action_dim, batch_size, device):
+    # TorchScript attribute annotations
+    capacity: int
+    batch_size: int
+    action_dim: int
+    state_dim: int
+
+    def __init__(self, capacity: int, state_dim: int, action_dim: int, batch_size: int, device: torch.device):
         super(ReplayBuffer, self).__init__()
 
+        self.capacity = capacity
+        self.batch_size = batch_size
+        self.device = device
+        self.action_dim = action_dim
+        self.state_dim = state_dim
 
-        self.capacity, self.batch_size, self.device = capacity, batch_size, device
-        self.action_dim, self.state_dim = action_dim, state_dim
 
-        self.register_buffer("norm", torch.tensor(1, dtype=torch.float16, device=device))
-        self.register_buffer("ptr", torch.tensor(0, dtype=torch.long, device=device))
-        self.register_buffer("length", torch.tensor(0, dtype=torch.long, device=device))
 
+        self.register_buffer("ptr", torch.tensor(0, dtype=torch.long, device="cpu"))
+        self.register_buffer("length", torch.tensor(0, dtype=torch.long, device="cpu"))
+        # CPU terminal lifecycle tracker (1 MB RAM per 1M transitions):
+        # 0 = normal/expired transition (can overwrite)
+        # 1 = fresh terminal transition (protected for 1 cycle)
+        self.terminal_lifecycle = torch.zeros(self.capacity, dtype=torch.uint8, device="cpu")
+
+        # Normalization and Replay Buffers on GPU
+        self.register_buffer("norm", torch.tensor(1.0, dtype=torch.float16, device=self.device))
         self.register_buffer("states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float16, device=self.device))
         self.register_buffer("actions", torch.zeros((self.capacity, self.action_dim), dtype=torch.float16, device=self.device))
         self.register_buffer("rewards", torch.zeros((self.capacity, 1), dtype=torch.float16, device=self.device))
         self.register_buffer("next_states", torch.zeros((self.capacity, self.state_dim), dtype=torch.float16, device=self.device))
         self.register_buffer("not_dones_gamma", torch.zeros((self.capacity, 1), dtype=torch.float16, device=self.device))
-        self.register_buffer("probs", torch.ones(self.capacity, dtype=torch.float16, device=self.device))
+        self.register_buffer("cdf", torch.zeros(self.capacity, dtype=torch.float32, device=self.device))
+
+        indexes = torch.arange(0, self.capacity, 1, device=self.device, dtype=torch.float32) / self.capacity
+        weights = torch.exp(-((torch.abs(indexes - phi / 2) / phi_) ** (2 * math.e)))
+
+        # Precompute cumulative distribution function once:
+        cdf = torch.cumsum(weights, dim=0)
+        cdf = cdf / cdf[-1]
+        cdf[-1] = 1.0  # Guard against float rounding to prevent out-of-bounds in searchsorted
+        self.cdf.copy_(cdf)
 
     def init(self):
-
         self.states.zero_()
         self.actions.zero_()
         self.rewards.zero_()
         self.next_states.zero_()
         self.not_dones_gamma.zero_()
-        self.probs.fill_(1.0)
-
         self.norm.fill_(1.0)
+
+        # Reset CPU state
         self.ptr.zero_()
         self.length.zero_()
+        self.terminal_lifecycle.zero_()
 
     def add(self, state, action, reward, next_state, done):
-
-        reward += 0.1 * np.sum(action**2)
-
         if self.length.item() < self.capacity:
             self.length.add_(1)
-        # Protect old terminal transitions
-        elif self.not_dones_gamma[self.ptr].item() < 1e-8:
-            self.not_dones_gamma[self.ptr] += 1e-8
-            # In-place tensor math to advance and skip this slot
+        elif self.terminal_lifecycle[self.ptr] == 1:
+            # Grant 1 extra cycle: demote to 0 so it gets overwritten NEXT loop, then advance
+            self.terminal_lifecycle[self.ptr] = 0
             self.ptr.add_(1).remainder_(self.capacity)
 
-        # Direct assignment using the 0-d tensor natively
+        # Mark lifecycle state in host RAM
+        self.terminal_lifecycle[self.ptr] = 1 if done else 0
+
+        # Asynchronous device writes (no GPU-to-CPU sync stalls)
         self.states[self.ptr] = torch.as_tensor(state, dtype=torch.float16, device=self.device)
         self.actions[self.ptr] = torch.as_tensor(action, dtype=torch.float16, device=self.device)
-        self.rewards[self.ptr] = torch.as_tensor([reward / self.norm], dtype=torch.float16, device=self.device)
+        self.rewards[self.ptr] = torch.as_tensor([reward], dtype=torch.float16, device=self.device) / self.norm
         self.next_states[self.ptr] = torch.as_tensor(next_state, dtype=torch.float16, device=self.device)
         self.not_dones_gamma[self.ptr] = torch.as_tensor([0.99 * (1.0 - float(done))], dtype=torch.float16, device=self.device)
 
-        # Advance the tensor pointer in-place for the next insertion
         self.ptr.add_(1).remainder_(self.capacity)
 
     @jit.script_method
     def sample(self):
-
-        indices = torch.multinomial(self.probs, num_samples=self.batch_size, replacement=True) # fixed indexes
+        #Parallel binary search on GPU - takes single-digit microseconds
+        indices = torch.searchsorted(self.cdf, torch.rand(self.batch_size, device=self.cdf.device), right=False)
+        # Circular offset
         indices.add_(self.ptr).remainder_(self.capacity)
 
         return (
@@ -522,53 +354,40 @@ class ReplayBuffer(jit.ScriptModule):
             self.not_dones_gamma[indices].float()
         )
 
-
     def __len__(self):
-        return self.length
-    
+        return self.length.item()
 
-    #==============================================================
-    #==============================================================
-    #===========================HELPERS============================
-    #==============================================================
-    #==============================================================
+    # ========================== Helper functions =======================================
 
-    def _repeat(self, original_len, times):
+
+    def _repeat(self, original_len: int, times: int):
         current_idx = original_len
         for _ in range(1, times):
             space_left = self.capacity - current_idx
-            if space_left <= 0: break
-            
+            if space_left <= 0:
+                break
             copy_size = min(original_len, space_left)
-            
-            self.states[current_idx : current_idx + copy_size] = self.states[:copy_size]
-            self.actions[current_idx : current_idx + copy_size] = self.actions[:copy_size]
-            self.rewards[current_idx : current_idx + copy_size] = self.rewards[:copy_size]
-            self.next_states[current_idx : current_idx + copy_size] = self.next_states[:copy_size]
-            self.not_dones_gamma[current_idx : current_idx + copy_size] = self.not_dones_gamma[:copy_size]
-            
+
+            self.states[current_idx : current_idx + copy_size].copy_(self.states[:copy_size])
+            self.actions[current_idx : current_idx + copy_size].copy_(self.actions[:copy_size])
+            self.rewards[current_idx : current_idx + copy_size].copy_(self.rewards[:copy_size])
+            self.next_states[current_idx : current_idx + copy_size].copy_(self.next_states[:copy_size])
+            self.not_dones_gamma[current_idx : current_idx + copy_size].copy_(self.not_dones_gamma[:copy_size])
+
+            # Mirror repeats to CPU lifecycle buffer
+            self.terminal_lifecycle[current_idx : current_idx + copy_size].copy_(self.terminal_lifecycle[:copy_size])
+
             current_idx += copy_size
         return current_idx
 
-
     def norm_fill(self, times: int):
-        # Use .item() to get the integer for slicing
-        curr_len = self.length.item()
-        
-        # 1 repeat
         self._repeat(self.length.item(), times)
 
-
-        # 2. Normalize
         mean_val = torch.mean(torch.abs(self.rewards))
         self.norm.fill_(mean_val)
-        self.rewards.div_(self.norm) # In-place division
+        self.rewards.div_(self.norm)
 
-        # 3. Reset tracking
         self.length.fill_(self.capacity)
         self.ptr.fill_(0)
 
-        # 4. Probabilities (Pre-calculated for the compiler)
-        indexes = torch.arange(0, self.capacity, 1, device=self.device) / self.capacity
-        weights = torch.exp(-(torch.abs(indexes - phi / 2) / phi_) ** (2*math.e))
-        self.probs.copy_(weights / torch.sum(weights))
+
