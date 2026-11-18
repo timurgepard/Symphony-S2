@@ -22,15 +22,8 @@ class FeatureExtractor(jit.ScriptModule):
         super(FeatureExtractor, self).__init__()
 
 
-
         self.z = FourierSeries(state_dim, h_dim, z_dim)
         self.norm = nn.RMSNorm(state_dim + z_dim)
-
-        self.z_ = FourierSeries(state_dim, h_dim, z_dim)
-        self.norm_ = nn.RMSNorm(state_dim + z_dim)
-
-        self.z_a = FeedForward(state_dim + z_dim + action_dim, h_dim, z_dim, 1, drop)
-        self.normax = nn.RMSNorm(state_dim + action_dim + 2*z_dim)
 
 
     @jit.script_method
@@ -39,11 +32,9 @@ class FeatureExtractor(jit.ScriptModule):
 
 
     @jit.script_method
-    def sz_ax(self, s, a):
-        sz_ = self.norm_(torch.cat([s, self.z_(s)], dim=-1))
-        sz_a = torch.cat([sz_, a], dim=-1)
-        x = self.z_a.latent(sz_a)
-        return self.normax(torch.cat([sz_a, x], dim=-1))
+    def sza(self, s, a):
+        return torch.cat([self.sz(s), a], dim=-1)
+
 
 
 
@@ -98,7 +89,7 @@ class ActorCritic(jit.ScriptModule):
 
 
 
-        self.critic = Critic(state_dim + action_dim + 2*fn, h_dim, z_dim, q_dist, drop)
+        self.critic = Critic(state_dim + action_dim + fn, h_dim, z_dim, q_dist, drop)
         
         indexes = torch.arange(0, q_dist, 1)/q_dist
         weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(2*math.e))
@@ -117,7 +108,7 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def critic_soft(self, state, action):
-        q =  self.critic(self.fe.sz_ax(state, action))
+        q =  self.critic(self.fe.sza(state, action))
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
         q_soft_detached = q_soft.detach()
         self.q_ema.mul_(self.alpha).add_(q_soft_detached.mean(), alpha=self._alpha)
@@ -134,13 +125,13 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def critic_direct(self, state, action):
-        return self.critic(self.fe.sz_ax(state, action))
+        return self.critic(self.fe.sza(state, action))
         
 
 
     @jit.script_method
     def critic_info(self, state, action):
-        q =  self.critic(self.fe.sz_ax(state, action))
+        q =  self.critic(self.fe.sza(state, action))
         q_std = q.std(dim=-1, keepdim=True)/q.detach().pow(2).mean(dim=-1, keepdim=True).sqrt()
         return self.q_ema.clone(), q_std
     
