@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import math
 import torch.jit as jit
-from runtime import Adam, ReHSE, ReHAE, FourierSeries, FeedForward, FeedForwardTrinity, Swaddling
+from runtime import Adam, ReHSE, ReHAE, FourierSeries, FeedForward, HolyTrinity, Swaddling
 
 # global constants:
 phi = (math.sqrt(5)+1)/2 #1.618...
@@ -23,29 +23,28 @@ class FeatureExtractor(jit.ScriptModule):
 
 
 
-        self.ffw = FourierSeries(state_dim, h_dim, z_dim)
-        self.norm1 = nn.RMSNorm(state_dim + z_dim)
+        self.z = FourierSeries(state_dim, h_dim, z_dim)
+        self.norm = nn.RMSNorm(state_dim + z_dim)
 
-        self.rew = FeedForward(state_dim + z_dim + action_dim, h_dim, z_dim, 1, drop)
-        self.norm2 = nn.RMSNorm(state_dim + action_dim + 2*z_dim)
+        self.z_ = FourierSeries(state_dim, h_dim, z_dim)
+        self.norm_ = nn.RMSNorm(state_dim + z_dim)
 
-
-    @jit.script_method
-    def z(self, s):
-        return self.norm1(torch.cat([s, self.ffw(s)], dim=-1))
+        self.z_a = FeedForward(state_dim + z_dim + action_dim, h_dim, z_dim, 1, drop)
+        self.normax = nn.RMSNorm(state_dim + action_dim + 2*z_dim)
 
 
     @jit.script_method
-    def za(self, s, a):
-        za = torch.cat([a, self.z(s)], dim=-1)
-        with torch.no_grad(): fr = self.rew.latent(za)
-        return self.norm2(torch.cat([za, fr], dim=-1))
-
+    def sz(self, s):
+        return self.norm(torch.cat([s, self.z(s)], dim=-1))
 
 
     @jit.script_method
-    def transition(self, s, a):
-        return self.rew(torch.cat([a, self.z(s)], dim=-1))
+    def sz_ax(self, s, a):
+        sz_ = self.norm_(torch.cat([s, self.z_(s)], dim=-1))
+        sz_a = torch.cat([sz_, a], dim=-1)
+        x = self.z_a.latent(sz_a)
+        return self.normax(torch.cat([sz_a, x], dim=-1))
+
 
 
 
@@ -71,7 +70,7 @@ class Critic(jit.ScriptModule):
     def __init__(self, state_action_dim: int, h_dim: int, z_dim: int, q_dist: int, drop: bool = True):
         super().__init__()
         q_nodes = q_dist // 3
-        self.God = FeedForwardTrinity(state_action_dim, h_dim, z_dim, q_nodes, drop)
+        self.God = HolyTrinity(state_action_dim, h_dim, z_dim, q_nodes, drop)
 
     @jit.script_method
     def forward(self, state_action):
@@ -112,13 +111,13 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor_soft(self, state):
-        A, S, B = self.actor(self.fe.z(state))
+        A, S, B = self.actor(self.fe.sz(state))
         return self.a_max * torch.tanh(S * A + self.N), S, B
 
 
     @jit.script_method
     def critic_soft(self, state, action):
-        q =  self.critic(self.fe.za(state, action))
+        q =  self.critic(self.fe.sz_ax(state, action))
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
         q_soft_detached = q_soft.detach()
         self.q_ema.mul_(self.alpha).add_(q_soft_detached.mean(), alpha=self._alpha)
@@ -128,22 +127,20 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, test:float=0.0):
-        A, S, B = self.actor(self.fe.z(state))
+        A, S, B = self.actor(self.fe.sz(state))
         self.N.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
         return self.a_max * torch.tanh(active * S * A + (1.0-test) * self.N[0:1])
 
 
     @jit.script_method
     def critic_direct(self, state, action):
-        q_pred = self.critic(self.fe.za(state, action))
-        r_pred = self.fe.transition(state, action)
-        return q_pred, r_pred
+        return self.critic(self.fe.sz_ax(state, action))
         
 
 
     @jit.script_method
     def critic_info(self, state, action):
-        q =  self.critic(self.fe.za(state, action))
+        q =  self.critic(self.fe.sz_ax(state, action))
         q_std = q.std(dim=-1, keepdim=True)/q.detach().pow(2).mean(dim=-1, keepdim=True).sqrt()
         return self.q_ema.clone(), q_std
     
@@ -202,10 +199,10 @@ class Nets(jit.ScriptModule):
 
         sw_and_beta_loss, sw_value = self.sw(next_scale, next_beta)
         q_target = reward + not_done_gamma * (q_next_target_value - sw_value)
-        q_pred, r_pred = self.online.critic_direct(state, action)
+        q_pred = self.online.critic_direct(state, action)
 
 
-        net_loss = self.rehse(r_pred - reward) + self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + sw_and_beta_loss
+        net_loss = self.rehse(q_pred-q_target) - self.rehae((q_next_target - q_next_ema)/q_next_ema.abs()) + sw_and_beta_loss
         net_loss.backward()
 
 
@@ -244,10 +241,6 @@ class Symphony(object):
         with torch.no_grad(): return self.nets.online.actor_play(state, active, noise)[0]
     """
 
-
-
-    def train(self):
-        self.update()
 
 
     def update(self):
