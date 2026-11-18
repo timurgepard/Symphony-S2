@@ -244,7 +244,6 @@ class FourierSeries(jit.ScriptModule):
 
 
 
-
 class FeedForward(jit.ScriptModule):
     def __init__(self, f_in, h_dim, z_dim, f_out, drop):
         super().__init__()
