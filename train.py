@@ -255,7 +255,6 @@ def sim_loop(env, episodes, stage, algo, episode_return, episode_steps, total_st
 
 
 
-
 # Loading existing models
 stage, episode_return, episode_steps, total_steps = load(algo, stage)
 if not stage["training"]: log_file.clean(); algo.nets.replay_buffer.init()
