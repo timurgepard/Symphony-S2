@@ -30,13 +30,14 @@ h_dim = 432
 batch_size = q_dist = 432
 alpha, tau = phi_, 0.001
 num_episodes = 100000
-limit_test = 1000
-limit_step = 1000 #max steps per episode
+limit_test = 200
+limit_step = 200 #max steps per episode
 start_episode = 1 #number for the identification of the current episode
 episode_rewards, episode_steps, total_steps = [], [], 0
 stage = {"exploration": True, "training": False, "testing": False}
 
 # environment type.
+#env_name = 'Pendulum-v1'
 env_name = 'Humanoid-v4'
 #env_name = 'BipedalWalker-v3'
 #env_name = 'HalfCheetah-v4'
@@ -229,7 +230,7 @@ def sim_loop(env, episodes, stage, algo, episode_return, episode_steps, total_st
             #t_rb = time.perf_counter()
 
             # actual training
-            if stage["training"]: algo.train()
+            if stage["training"]: algo.update()
             #t_gpu = time.perf_counter()
             #print(f"Env: {(t_env - t0)*1000:.2f}ms | Buffer: {(t_rb - t_env)*1000:.2f}ms | Train: {(t_gpu - t_rb)*1000:.2f}ms")  
 
