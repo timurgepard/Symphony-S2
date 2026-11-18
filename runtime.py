@@ -5,6 +5,7 @@ import torch.jit as jit
 import torch.optim as optim
 import math
 
+# ========================== ENSEMBLED VERSIONS TO RUN 3 Critics Simultaneusly ------------------------------------
 
 #ReSine Activation Function
 # jit.ScriptModule -> JIT C++ graph
@@ -20,10 +21,7 @@ class EnReSine(jit.ScriptModule):
     @jit.script_method
     def forward(self, x: torch.Tensor):
         # x is expected to have shape (N, batch_size, hidden_dim)
-        # s and b_ each have shape (N, 1, hidden_dim)
         s, b_ = torch.sigmoid(self.sb_).chunk(2, dim=-1)
-        
-        # Broadcasted operations over batch dimension
         x = s * torch.sin(x / s)
         return x * torch.sigmoid(x / (b_ * s))
 
@@ -58,22 +56,20 @@ class EnLayerNorm(jit.ScriptModule):
         self.n = n
         self.eps = eps
 
-        # Форма (n, 1, normalized_shape) для бродкаста по размеру батча
         self.weight = nn.Parameter(torch.ones(n, 1, normalized_shape))
         self.bias = nn.Parameter(torch.zeros(n, 1, normalized_shape))
 
     @jit.script_method
     def forward(self, x: torch.Tensor):
-        # x: (n, batch, dim)
+
         mean = x.mean(dim=-1, keepdim=True)
         var = x.var(dim=-1, unbiased=False, keepdim=True)
-
         x_norm = (x - mean) / torch.sqrt(var + self.eps)
         return x_norm * self.weight + self.bias
 
 
 
-class FeedForwardTrinity(jit.ScriptModule):
+class HolyTrinity(jit.ScriptModule):
     def __init__(self, f_in: int, h_dim: int, z_dim: int, q_nodes: int, drop: bool):
         super().__init__()
         
@@ -92,8 +88,7 @@ class FeedForwardTrinity(jit.ScriptModule):
         return self.ffw(x)
 
 
-
-
+# ===========================================================================================
 
 class Adam(optim.Optimizer):
     def __init__(self, params, lr=3e-4, weight_decay=0.01, betas=(0.9, 0.999), eps=1e-8):
@@ -114,20 +109,36 @@ class Adam(optim.Optimizer):
 
     @torch.no_grad()
     def step(self):
-        if not self.init: self._setup()
-        grads = [p.grad for p in self.p]
+        if not self.init: 
+            self._setup()
 
-        # 5 clean vector one-liners across ALL layers simultaneously:
-        torch._foreach_mul_(self.m, self.b1)
-        torch._foreach_add_(self.m, grads, alpha=self.b1_)
-        torch._foreach_mul_(self.v, self.b2)
-        torch._foreach_addcmul_(self.v, grads, grads, value=self.b2_)
-        torch._foreach_mul_(self.e, self.b2)
-        torch._foreach_add_(self.e, self.eps * self.b2_)
+        # Filter out parameters whose grad is None
+        p_active, grads, m_active, v_active, e_active  = [], [], [], [], []
 
-        denom = torch._foreach_add(torch._foreach_sqrt(self.v), self.e)
-        torch._foreach_mul_(self.p, self.decay)
-        torch._foreach_addcdiv_(self.p, self.m, denom, value=-self.lr)
+
+        for p, m, v, e in zip(self.p, self.m, self.v, self.e):
+            if p.grad is None: continue
+            p_active.append(p)
+            grads.append(p.grad)
+            m_active.append(m)
+            v_active.append(v)
+            e_active.append(e)
+
+        # If all gradients are None, exit early
+        if not p_active: return
+            
+
+        # Vectorized operations only over active parameters
+        torch._foreach_mul_(m_active, self.b1)
+        torch._foreach_add_(m_active, grads, alpha=self.b1_)
+        torch._foreach_mul_(v_active, self.b2)
+        torch._foreach_addcmul_(v_active, grads, grads, value=self.b2_)
+        torch._foreach_mul_(e_active, self.b2)
+        torch._foreach_add_(e_active, self.eps * self.b2_)
+
+        denom = torch._foreach_add(torch._foreach_sqrt(v_active), e_active)
+        torch._foreach_mul_(p_active, self.decay)
+        torch._foreach_addcdiv_(p_active, m_active, denom, value=-self.lr)
 
 
 #Rectified Huber Symmetric Error Loss Function via JIT Module
