@@ -24,14 +24,14 @@ torch.cuda.empty_cache()
 print(device)
 
 learning_rate = 1e-4
-explore_time, times = 20000, 50
+explore_time, times = 10000, 50
 capacity = explore_time * times
-h_dim = 432
-batch_size = q_dist = 432
+h_dim = 288
+batch_size = q_dist = 288
 alpha, tau = phi_, 0.001
 num_episodes = 100000
-limit_test = 200
-limit_step = 200 #max steps per episode
+limit_test = 1000
+limit_step = 1000 #max steps per episode
 start_episode = 1 #number for the identification of the current episode
 episode_rewards, episode_steps, total_steps = [], [], 0
 stage = {"exploration": True, "training": False, "testing": False}
