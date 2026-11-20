@@ -37,10 +37,7 @@ episode_rewards, episode_steps, total_steps = [], [], 0
 stage = {"exploration": True, "training": False, "testing": False}
 
 # environment type.
-#env_name = 'Pendulum-v1'
 env_name = 'Humanoid-v4'
-#env_name = 'BipedalWalker-v3'
-#env_name = 'HalfCheetah-v4'
 
 
 pre_valid = False # testing models when loaded
