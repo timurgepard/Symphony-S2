@@ -24,10 +24,10 @@ torch.cuda.empty_cache()
 print(device)
 
 learning_rate = 1e-4
-explore_time, times = 10000, 50
+explore_time, times = 20000, 50
 capacity = explore_time * times
-h_dim = 288
-batch_size = q_dist = 288
+h_dim = 432
+batch_size = q_dist = 432
 alpha, tau = phi_, 0.001
 num_episodes = 100000
 limit_test = 1000
@@ -220,19 +220,11 @@ def sim_loop(env, episodes, stage, algo, episode_return, episode_steps, total_st
                 print("end of testing")
 
 
-            # if steps is close to episode limit (e.g. 900) we shut down actions to get Terminal Transition:
             action = algo.select_action(state,  active=True, test=stage["testing"]) 
-            #t0 = time.perf_counter()
             next_state, reward, done, truncated, info = env.step(action)
-            #t_env = time.perf_counter()
-
             if not stage["testing"]: algo.nets.replay_buffer.add(state, action, reward, next_state, done)
-            #t_rb = time.perf_counter()
-
-            # actual training
             if stage["training"]: algo.update()
-            #t_gpu = time.perf_counter()
-            #print(f"Env: {(t_env - t0)*1000:.2f}ms | Buffer: {(t_rb - t_env)*1000:.2f}ms | Train: {(t_gpu - t_rb)*1000:.2f}ms")  
+
 
             Return += reward
             if done: break
@@ -252,6 +244,7 @@ def sim_loop(env, episodes, stage, algo, episode_return, episode_steps, total_st
             print(f"Ep {episode}: Rtrn = {Return:.2f}, Avg300 = {average_reward:.2f}| ep steps = {steps} | total_steps = {total_steps}") 
 
     return np.mean(episode_return).item()
+
 
 
 
