@@ -244,6 +244,7 @@ class FourierSeries(jit.ScriptModule):
 
 
 
+
 class FeedForward(jit.ScriptModule):
     def __init__(self, f_in, h_dim, z_dim, f_out, drop):
         super().__init__()
@@ -255,15 +256,12 @@ class FeedForward(jit.ScriptModule):
             nn.Linear(h_dim, h_dim),
             ReSine(h_dim),
             nn.Linear(h_dim, z_dim),
+            GradientDropout(drop),
+            nn.Linear(z_dim, f_out)
         )
 
-        self._ = GradientDropout(drop)
-        self.out = nn.Linear(z_dim, f_out)
-
-    @jit.script_method
-    def latent(self, x):
-        return self.ffw(x)
 
     @jit.script_method
     def forward(self, x):
-        return self.out(self._(self.ffw(x)))
+        return self.ffw(x)
+
