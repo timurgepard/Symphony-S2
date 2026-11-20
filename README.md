@@ -1,4 +1,7 @@
 
+pip3 install gymnasium[mujoco]
+pytorch cuda: https://pytorch.org/get-started/locally/
+
 Author's implementation of the
 
 # Symphony: A Heuristic Normalized Calibrated Advantage Actor and Critic Algorithm in application for Humanoid Robots
