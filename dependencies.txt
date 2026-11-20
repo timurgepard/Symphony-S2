@@ -1,2 +1,0 @@
-pip3 install gymnasium[mujoco]
-pytorch cuda: https://pytorch.org/get-started/locally/
