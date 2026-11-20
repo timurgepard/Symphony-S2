@@ -18,7 +18,7 @@ phi_ = 1/phi #0.618...
 
 
 class FeatureExtractor(jit.ScriptModule):
-    def __init__(self, state_dim, h_dim, z_dim, action_dim, drop):
+    def __init__(self, state_dim, h_dim, z_dim):
         super(FeatureExtractor, self).__init__()
 
 
@@ -43,11 +43,11 @@ class FeatureExtractor(jit.ScriptModule):
 
 # jit.ScriptModule -> JIT C++ graph
 class Actor(jit.ScriptModule):
-    def __init__(self, state_dim, h_dim, z_dim, action_dim, drop=True):
+    def __init__(self, state_dim, h_dim, action_dim, drop=True):
         super().__init__()
 
         self.action_dim = action_dim
-        self.Adam = FeedForward(state_dim, h_dim, z_dim, 3*action_dim, drop)
+        self.Adam = FeedForward(state_dim, h_dim, 3*action_dim, drop)
 
 
     @jit.script_method
@@ -58,10 +58,15 @@ class Actor(jit.ScriptModule):
 
 
 class Critic(jit.ScriptModule):
-    def __init__(self, state_action_dim: int, h_dim: int, z_dim: int, q_dist: int, drop: bool = True):
+    def __init__(self, state_dim: int, action_dim: int, z_dim: int, h_dim: int, q_dist: int, drop: bool = True):
         super().__init__()
         q_nodes = q_dist // 3
-        self.God = HolyTrinity(state_action_dim, h_dim, z_dim, q_nodes, drop)
+
+        self.God = HolyTrinity(state_dim + action_dim + z_dim, h_dim, q_nodes, drop)
+
+        self.fe = FeatureExtractor(state_dim, h_dim, z_dim)
+
+        
 
     @jit.script_method
     def forward(self, state_action):
@@ -74,22 +79,19 @@ class ActorCritic(jit.ScriptModule):
     def __init__(self, state_dim, action_dim, h_dim, alpha, q_dist, max_action, drop=True):
         super().__init__()
 
-        fn = h_dim//12
-        z_dim = q_dist
+        z_dim = h_dim//12
 
+        
 
-        self.fe = FeatureExtractor(state_dim, h_dim, fn, action_dim, drop=False)
+        self.actor = Actor(state_dim + z_dim, h_dim, action_dim, drop)
 
-        self.actor = Actor(state_dim + fn, h_dim, z_dim, action_dim, drop)
         self.register_buffer('a_max', torch.as_tensor(max_action, dtype=torch.float32))
-
-
         self.std = 1/math.e
         self.register_buffer('N', torch.empty((q_dist, action_dim)))
 
 
+        self.critic = Critic(state_dim, action_dim, z_dim, h_dim, q_dist, drop)
 
-        self.critic = Critic(state_dim + action_dim + fn, h_dim, z_dim, q_dist, drop)
         
         indexes = torch.arange(0, q_dist, 1)/q_dist
         weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(2*math.e))
@@ -102,13 +104,13 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor_soft(self, state):
-        A, S, B = self.actor(self.fe.sz(state))
+        A, S, B = self.actor(self.critic.fe.sz(state))
         return self.a_max * torch.tanh(S * A + self.N), S, B
 
 
     @jit.script_method
     def critic_soft(self, state, action):
-        q =  self.critic(self.fe.sza(state, action))
+        q =  self.critic(self.critic.fe.sza(state, action))
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
         q_soft_detached = q_soft.detach()
         self.q_ema.mul_(self.alpha).add_(q_soft_detached.mean(), alpha=self._alpha)
@@ -118,20 +120,20 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, test:float=0.0):
-        A, S, B = self.actor(self.fe.sz(state))
+        A, S, B = self.actor(self.critic.fe.sz(state))
         self.N.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
         return self.a_max * torch.tanh(active * S * A + (1.0-test) * self.N[0:1])
 
 
     @jit.script_method
     def critic_direct(self, state, action):
-        return self.critic(self.fe.sza(state, action))
+        return self.critic(self.critic.fe.sza(state, action))
         
 
 
     @jit.script_method
     def critic_info(self, state, action):
-        q =  self.critic(self.fe.sza(state, action))
+        q =  self.critic(self.critic.fe.sza(state, action))
         q_std = q.std(dim=-1, keepdim=True)/q.detach().pow(2).mean(dim=-1, keepdim=True).sqrt()
         return self.q_ema.clone(), q_std
     
@@ -171,11 +173,7 @@ class Nets(jit.ScriptModule):
     @torch.no_grad()
     def tau_update(self):
 
-
         for target_param, param in zip(self.target.critic.parameters(), self.online.critic.parameters()):
-            target_param.lerp_(param, self.tau)
-
-        for target_param, param in zip(self.target.fe.parameters(), self.online.fe.parameters()):
             target_param.lerp_(param, self.tau)
 
 
