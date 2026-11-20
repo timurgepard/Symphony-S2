@@ -70,7 +70,7 @@ class EnLayerNorm(jit.ScriptModule):
 
 
 class HolyTrinity(jit.ScriptModule):
-    def __init__(self, f_in: int, h_dim: int, z_dim: int, q_nodes: int, drop: bool):
+    def __init__(self, f_in: int, h_dim: int, f_out: int, drop: bool):
         super().__init__()
         
         self.ffw = nn.Sequential(
@@ -78,9 +78,9 @@ class HolyTrinity(jit.ScriptModule):
             EnLayerNorm(h_dim),
             EnLinear(h_dim, h_dim),
             EnReSine(h_dim),
-            EnLinear(h_dim, z_dim),
+            EnLinear(h_dim, h_dim),
             GradientDropout(drop),
-            EnLinear(z_dim, q_nodes)
+            EnLinear(h_dim, f_out)
         )
 
     @jit.script_method
@@ -229,13 +229,13 @@ class Swaddling(jit.ScriptModule):
 
 
 class FourierSeries(jit.ScriptModule):
-    def __init__(self, f_in, h_dim, z_dim):
+    def __init__(self, f_in, h_dim, f_out):
         super(FourierSeries, self).__init__()
 
         self.ffw = nn.Sequential(
             nn.Linear(f_in, h_dim),
             ReSine(h_dim),
-            nn.Linear(h_dim, z_dim)
+            nn.Linear(h_dim, f_out)
         )
 
     @jit.script_method
@@ -246,7 +246,7 @@ class FourierSeries(jit.ScriptModule):
 
 
 class FeedForward(jit.ScriptModule):
-    def __init__(self, f_in, h_dim, z_dim, f_out, drop):
+    def __init__(self, f_in, h_dim, f_out, drop):
         super().__init__()
 
 
@@ -255,9 +255,9 @@ class FeedForward(jit.ScriptModule):
             nn.LayerNorm(h_dim),
             nn.Linear(h_dim, h_dim),
             ReSine(h_dim),
-            nn.Linear(h_dim, z_dim),
+            nn.Linear(h_dim, h_dim),
             GradientDropout(drop),
-            nn.Linear(z_dim, f_out)
+            nn.Linear(h_dim, f_out)
         )
 
 
