@@ -39,8 +39,6 @@ class FeatureExtractor(jit.ScriptModule):
 
 
 
-
-
 # jit.ScriptModule -> JIT C++ graph
 class Actor(jit.ScriptModule):
     def __init__(self, state_dim, h_dim, action_dim, drop=True):
@@ -51,28 +49,25 @@ class Actor(jit.ScriptModule):
 
 
     @jit.script_method
-    def forward(self, state):
-        A, S, B = torch.tanh(self.Adam(state)/2).chunk(3, dim=-1)
+    def forward(self, x):
+        A, S, B = torch.tanh(self.Adam(x)/2).chunk(3, dim=-1)
         return A, S.abs(), B.abs()
 
 
 
 class Critic(jit.ScriptModule):
-    def __init__(self, state_dim: int, action_dim: int, z_dim: int, h_dim: int, q_dist: int, drop: bool = True):
+    def __init__(self, state_action_z_dim: int, h_dim: int, q_dist: int, drop: bool = True):
         super().__init__()
         q_nodes = q_dist // 3
 
-        self.God = HolyTrinity(state_dim + action_dim + z_dim, h_dim, q_nodes, drop)
+        self.God = HolyTrinity(state_action_z_dim, h_dim, q_nodes, drop)
 
-        self.fe = FeatureExtractor(state_dim, h_dim, z_dim)
-
-        
 
     @jit.script_method
-    def forward(self, state_action):
-        x3d = state_action.unsqueeze(0).expand(3, -1, -1)
+    def forward(self, x):
+        x3d = x.unsqueeze(0).expand(3, -1, -1)
         # (3, batch, q_nodes) -> (batch, 3, q_nodes) -> (batch, q_dist)
-        return self.God(x3d).transpose(0, 1).reshape(state_action.size(0), -1)
+        return self.God(x3d).transpose(0, 1).reshape(x.size(0), -1)
 
 # jit.ScriptModule -> JIT C++ graph
 class ActorCritic(jit.ScriptModule):
@@ -81,7 +76,7 @@ class ActorCritic(jit.ScriptModule):
 
         z_dim = h_dim//12
 
-        
+        self.fe = FeatureExtractor(state_dim, h_dim, z_dim)
 
         self.actor = Actor(state_dim + z_dim, h_dim, action_dim, drop)
 
@@ -90,11 +85,11 @@ class ActorCritic(jit.ScriptModule):
         self.register_buffer('N', torch.empty((q_dist, action_dim)))
 
 
-        self.critic = Critic(state_dim, action_dim, z_dim, h_dim, q_dist, drop)
+        self.critic = Critic(state_dim + z_dim + action_dim, h_dim, q_dist, drop)
 
         
         indexes = torch.arange(0, q_dist, 1)/q_dist
-        weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(2*math.e))
+        weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(10))
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.alpha = alpha
@@ -104,13 +99,13 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor_soft(self, state):
-        A, S, B = self.actor(self.critic.fe.sz(state))
+        A, S, B = self.actor(self.fe.sz(state))
         return self.a_max * torch.tanh(S * A + self.N), S, B
 
 
     @jit.script_method
     def critic_soft(self, state, action):
-        q =  self.critic(self.critic.fe.sza(state, action))
+        q =  self.critic(self.fe.sza(state, action))
         q_soft = (self.probs * q.sort(dim=-1)[0]).sum(dim=-1, keepdim=True)
         q_soft_detached = q_soft.detach()
         self.q_ema.mul_(self.alpha).add_(q_soft_detached.mean(), alpha=self._alpha)
@@ -120,20 +115,20 @@ class ActorCritic(jit.ScriptModule):
 
     @jit.script_method
     def actor_play(self, state, active:float = 1.0, test:float=0.0):
-        A, S, B = self.actor(self.critic.fe.sz(state))
+        A, S, B = self.actor(self.fe.sz(state))
         self.N.normal_(0.0, 1.0).clamp_(-math.e, math.e).mul_(self.std)
         return self.a_max * torch.tanh(active * S * A + (1.0-test) * self.N[0:1])
 
 
     @jit.script_method
     def critic_direct(self, state, action):
-        return self.critic(self.critic.fe.sza(state, action))
+        return self.critic(self.fe.sza(state, action))
         
 
 
     @jit.script_method
     def critic_info(self, state, action):
-        q =  self.critic(self.critic.fe.sza(state, action))
+        q =  self.critic(self.fe.sza(state, action))
         q_std = q.std(dim=-1, keepdim=True)/q.detach().pow(2).mean(dim=-1, keepdim=True).sqrt()
         return self.q_ema.clone(), q_std
     
@@ -174,6 +169,9 @@ class Nets(jit.ScriptModule):
     def tau_update(self):
 
         for target_param, param in zip(self.target.critic.parameters(), self.online.critic.parameters()):
+            target_param.lerp_(param, self.tau)
+
+        for target_param, param in zip(self.target.fe.parameters(), self.online.fe.parameters()):
             target_param.lerp_(param, self.tau)
 
 
@@ -280,7 +278,7 @@ class ReplayBuffer(jit.ScriptModule):
         self.register_buffer("cdf", torch.zeros(self.capacity, dtype=torch.float32, device=self.device))
 
         indexes = torch.arange(0, self.capacity, 1, device=self.device, dtype=torch.float32) / self.capacity
-        weights = torch.exp(-((torch.abs(indexes - phi / 2) / phi_) ** (2 * math.e)))
+        weights = torch.exp(-((torch.abs(indexes - phi / 2) / phi_) ** (10)))
 
         # Precompute cumulative distribution function once:
         cdf = torch.cumsum(weights, dim=0)
