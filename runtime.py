@@ -15,13 +15,15 @@ class EnReSine(jit.ScriptModule):
 
         k = 1.0 / math.sqrt(hidden_dim)
         # Parameter shape: (N, 1, 2 * hidden_dim) for automatic broadcasting over batch
-        initial_weight = 2.0 * k * torch.rand(n, 1, 2 * hidden_dim) - k
-        self.sb_ = nn.Parameter(data=initial_weight, requires_grad=True)
+        initial_weight = 2.0 * k * torch.rand(n, 1, hidden_dim) - k
+        self.s = nn.Parameter(data=initial_weight, requires_grad=True)
+        initial_weight = 2.0 * k * torch.rand(n, 1, hidden_dim) - k
+        self.b_ = nn.Parameter(data=initial_weight, requires_grad=True)
 
     @jit.script_method
     def forward(self, x: torch.Tensor):
-        # x is expected to have shape (N, batch_size, hidden_dim)
-        s, b_ = torch.sigmoid(self.sb_).chunk(2, dim=-1)
+        s = torch.sigmoid(self.s)
+        b_ = torch.sigmoid(self.b_)
         x = s * torch.sin(x / s)
         return x * torch.sigmoid(x / (b_ * s))
 
@@ -171,15 +173,21 @@ class ReHAE(jit.ScriptModule):
 class ReSine(jit.ScriptModule):
     def __init__(self, hidden_dim=256):
         super(ReSine, self).__init__()
-        k = 1/math.sqrt(hidden_dim)
-        self.sb_ = nn.Parameter(data=2.0*k*torch.rand(2*hidden_dim)-k, requires_grad=True)
+        k = 1.0 / math.sqrt(hidden_dim)
+        # Parameter shape: (N, 1, 2 * hidden_dim) for automatic broadcasting over batch
+        initial_weight = 2.0 * k * torch.rand(1, hidden_dim) - k
+        self.s = nn.Parameter(data=initial_weight, requires_grad=True)
+        initial_weight = 2.0 * k * torch.rand(1, hidden_dim) - k
+        self.b_ = nn.Parameter(data=initial_weight, requires_grad=True)
 
 
     @jit.script_method
-    def forward(self, x):
-        s, b_ = torch.sigmoid(self.sb_).chunk(2, dim=-1)
-        x = s*torch.sin(x/s)
-        return x * torch.sigmoid(x/(b_*s))
+    def forward(self, x: torch.Tensor):
+        s = torch.sigmoid(self.s)
+        b_ = torch.sigmoid(self.b_)
+        x = s * torch.sin(x / s)
+        return x * torch.sigmoid(x / (b_ * s))
+
 
 
 
