@@ -89,7 +89,7 @@ class ActorCritic(jit.ScriptModule):
 
         
         indexes = torch.arange(0, q_dist, 1)/q_dist
-        weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(10))
+        weights = torch.exp(-(torch.abs(1-phi/2-indexes)/phi_)**(3*math.e))
         self.probs = nn.Parameter(data= weights/torch.sum(weights), requires_grad=False)
 
         self.alpha = alpha
@@ -278,7 +278,7 @@ class ReplayBuffer(jit.ScriptModule):
         self.register_buffer("cdf", torch.zeros(self.capacity, dtype=torch.float32, device=self.device))
 
         indexes = torch.arange(0, self.capacity, 1, device=self.device, dtype=torch.float32) / self.capacity
-        weights = torch.exp(-((torch.abs(indexes - phi / 2) / phi_) ** (10)))
+        weights = torch.exp(-((torch.abs(indexes - phi / 2) / phi_) ** (3*math.e)))
 
         # Precompute cumulative distribution function once:
         cdf = torch.cumsum(weights, dim=0)
