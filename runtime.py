@@ -15,17 +15,18 @@ class EnReSine(jit.ScriptModule):
 
         k = 1.0 / math.sqrt(hidden_dim)
         # Parameter shape: (N, 1, 2 * hidden_dim) for automatic broadcasting over batch
-        initial_weight = 2.0 * k * torch.rand(n, 1, hidden_dim) - k
+        initial_weight = 2.0 * k * torch.rand(n, 1, 1) - k
         self.s = nn.Parameter(data=initial_weight, requires_grad=True)
-        initial_weight = 2.0 * k * torch.rand(n, 1, hidden_dim) - k
+        initial_weight = 2.0 * k * torch.rand(n, 1, 1) - k
         self.b_ = nn.Parameter(data=initial_weight, requires_grad=True)
+
 
     @jit.script_method
     def forward(self, x: torch.Tensor):
-        s = torch.sigmoid(self.s)
-        b_ = torch.sigmoid(self.b_)
-        x = s * torch.sin(x / s)
-        return x * torch.sigmoid(x / (b_ * s))
+        s, b_ = torch.sigmoid(self.s), torch.sigmoid(self.b_)
+        x = s * torch.sin(x/s)
+        return x * torch.sigmoid(x/(b_*s))
+
 
 
 
@@ -175,18 +176,17 @@ class ReSine(jit.ScriptModule):
         super(ReSine, self).__init__()
         k = 1.0 / math.sqrt(hidden_dim)
         # Parameter shape: (N, 1, 2 * hidden_dim) for automatic broadcasting over batch
-        initial_weight = 2.0 * k * torch.rand(1, hidden_dim) - k
+        initial_weight = 2.0 * k * torch.rand(1, 1) - k
         self.s = nn.Parameter(data=initial_weight, requires_grad=True)
-        initial_weight = 2.0 * k * torch.rand(1, hidden_dim) - k
+        initial_weight = 2.0 * k * torch.rand(1, 1) - k
         self.b_ = nn.Parameter(data=initial_weight, requires_grad=True)
-
 
     @jit.script_method
     def forward(self, x: torch.Tensor):
-        s = torch.sigmoid(self.s)
-        b_ = torch.sigmoid(self.b_)
-        x = s * torch.sin(x / s)
-        return x * torch.sigmoid(x / (b_ * s))
+        s, b_ = torch.sigmoid(self.s), torch.sigmoid(self.b_)
+        x = s * torch.sin(x/s)
+        return x * torch.sigmoid(x/(b_*s))
+
 
 
 
@@ -273,3 +273,4 @@ class FeedForward(jit.ScriptModule):
     def forward(self, x):
         return self.ffw(x)
 
+import mpmath
